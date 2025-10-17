@@ -16,7 +16,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is required")
+
+ADMIN_ID_STR = os.getenv('ADMIN_ID')
+if not ADMIN_ID_STR:
+    raise ValueError("ADMIN_ID environment variable is required")
+ADMIN_ID = int(ADMIN_ID_STR)
 PORT = int(os.getenv('PORT', 5000))
 DATABASE_PATH = '/tmp/bot_database.db'
 
@@ -101,6 +107,17 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS waitlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notified_admin BOOLEAN DEFAULT FALSE,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
             )
         ''')
         
@@ -316,6 +333,102 @@ def format_countdown(seconds: int) -> str:
     secs = seconds % 60
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
+# Waitlist functions
+def add_to_waitlist(user_id: int, username: str = None) -> bool:
+    """Add user to waitlist if not already in it. Returns True if user was added, False if already exists"""
+    existing = db.fetch_one("SELECT id FROM waitlist WHERE user_id = ?", (user_id,))
+    if not existing:
+        db.execute_query(
+            "INSERT INTO waitlist (user_id, username, notified_admin) VALUES (?, ?, FALSE)",
+            (user_id, username)
+        )
+        return True
+    return False
+
+def remove_from_waitlist(user_id: int) -> None:
+    """Remove user from waitlist"""
+    db.execute_query("DELETE FROM waitlist WHERE user_id = ?", (user_id,))
+
+def get_waitlist_users() -> List[Tuple]:
+    """Get all users in waitlist"""
+    return db.fetch_all("SELECT user_id, username, added_at FROM waitlist ORDER BY added_at ASC")
+
+def notify_admin_waitlist(bot, user_id: int, username: str = None) -> None:
+    """Notify admin when user is added to waitlist"""
+    try:
+        waitlist_count = db.fetch_one("SELECT COUNT(*) FROM waitlist")[0]
+        message = f"⚠️ User Added to Waitlist!\n\n"
+        message += f"👤 User ID: {user_id}\n"
+        message += f"📝 Username: @{username or 'N/A'}\n"
+        message += f"📋 Waitlist Size: {waitlist_count} user(s)\n\n"
+        message += f"💡 Add keys using /admin → Add Keys"
+        bot.send_message(chat_id=ADMIN_ID, text=message)
+    except Exception as e:
+        logger.error(f"Failed to notify admin about waitlist: {e}")
+
+def process_waitlist(bot) -> None:
+    """Process waitlist and assign keys to waiting users"""
+    waitlist = get_waitlist_users()
+    assigned_count = 0
+    
+    for user_id, username, added_at in waitlist:
+        # Check if user is blocked
+        blocked, reason = is_user_blocked(user_id)
+        if blocked:
+            remove_from_waitlist(user_id)
+            continue
+        
+        # Check if user can still claim (verified, not in cooldown)
+        user = get_user_data(user_id)
+        if not user or not user['verified']:
+            remove_from_waitlist(user_id)
+            continue
+        
+        # Check cooldown
+        if user['last_key_time']:
+            cooldown_hours = get_cooldown_hours()
+            last_claim = datetime.fromisoformat(user['last_key_time'])
+            next_claim = last_claim + timedelta(hours=cooldown_hours)
+            if datetime.now() < next_claim:
+                continue  # Still in cooldown, skip
+        
+        # Try to assign key
+        key_data = get_available_key()
+        if not key_data:
+            break  # No more keys available
+        
+        assigned_key = assign_key_to_user(user_id, username, key_data)
+        
+        # Send key to user
+        try:
+            key_message_template = get_key_message()
+            key_message = key_message_template.format(
+                key=assigned_key['key'],
+                duration=assigned_key['duration'],
+                product=assigned_key['product'],
+                link=assigned_key['link']
+            )
+            bot.send_message(
+                chat_id=user_id,
+                text=f"🎉 Your key is ready!\n\n{key_message}\n\n⏰ Expires: {assigned_key['expires_at'].strftime('%Y-%m-%d %H:%M')}"
+            )
+            assigned_count += 1
+        except Exception as e:
+            logger.error(f"Failed to send key to user {user_id}: {e}")
+        
+        # Remove from waitlist
+        remove_from_waitlist(user_id)
+    
+    # Notify admin if keys were assigned
+    if assigned_count > 0:
+        try:
+            bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"✅ Assigned {assigned_count} key(s) to waitlist users!"
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin about waitlist assignment: {e}")
+
 # Keyboard builders
 def get_main_keyboard(bot=None, user_id=None) -> InlineKeyboardMarkup:
     keyboard = []
@@ -336,7 +449,8 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton("📊 Statistics", callback_data="admin_stats"),
          InlineKeyboardButton("👥 All Users", callback_data="admin_all_users")],
-        [InlineKeyboardButton("🔑 Add Keys", callback_data="admin_add_keys")],
+        [InlineKeyboardButton("🔑 Add Keys", callback_data="admin_add_keys"),
+         InlineKeyboardButton("⏳ Waitlist", callback_data="admin_waitlist")],
         [InlineKeyboardButton("📢 Add Channel", callback_data="admin_add_channel"),
          InlineKeyboardButton("🗑 Remove Channel", callback_data="admin_remove_channel")],
         [InlineKeyboardButton("📋 List Channels", callback_data="admin_list_channels")],
@@ -434,15 +548,36 @@ def claim_callback(update: Update, context: CallbackContext) -> None:
     
     update_user(user_id, username)
     
-    can_claim, reason, _ = can_claim_key(user_id)
-    
-    if not can_claim:
-        query.answer(reason, show_alert=True)
+    # Check if user is verified
+    user = get_user_data(user_id)
+    if not user or not user['verified']:
+        query.answer("❌ You need to verify your channel membership first!", show_alert=True)
         return
     
+    # Check cooldown
+    if user['last_key_time']:
+        cooldown_hours = get_cooldown_hours()
+        last_claim = datetime.fromisoformat(user['last_key_time'])
+        next_claim = last_claim + timedelta(hours=cooldown_hours)
+        
+        if datetime.now() < next_claim:
+            time_left = next_claim - datetime.now()
+            seconds_left = int(time_left.total_seconds())
+            hours = seconds_left // 3600
+            minutes = (seconds_left % 3600) // 60
+            query.answer(f"⏳ Cooldown active!\n\n⏰ Time left: {hours}h {minutes}m", show_alert=True)
+            return
+    
+    # Check for available keys
     key_data = get_available_key()
     if not key_data:
-        query.answer("😔 No keys available!", show_alert=True)
+        # Add to waitlist and notify admin only if newly added
+        was_added = add_to_waitlist(user_id, username)
+        if was_added:
+            notify_admin_waitlist(context.bot, user_id, username)
+            query.answer("😔 No keys available right now!\n\n✅ You've been added to the waitlist.\n📬 You'll receive your key automatically when admin adds new keys!", show_alert=True)
+        else:
+            query.answer("😔 No keys available right now!\n\n⏳ You're already on the waitlist.\n📬 You'll receive your key automatically when admin adds new keys!", show_alert=True)
         return
     
     assigned_key = assign_key_to_user(user_id, username, key_data)
@@ -749,6 +884,31 @@ def announce_photo_callback(update: Update, context: CallbackContext) -> None:
         reply_markup=get_back_admin_keyboard()
     )
 
+def admin_waitlist_callback(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    
+    if query.from_user.id != ADMIN_ID:
+        query.answer("Access denied", show_alert=True)
+        return
+    
+    waitlist = get_waitlist_users()
+    
+    if not waitlist:
+        query.edit_message_text("✅ Waitlist is empty!", reply_markup=get_back_admin_keyboard())
+        return
+    
+    waitlist_text = "⏳ Users Waiting for Keys:\n\n"
+    for user_id, username, added_at in waitlist[:30]:
+        waitlist_text += f"• ID: {user_id} | @{username or 'N/A'}\n"
+    
+    if len(waitlist) > 30:
+        waitlist_text += f"\n... and {len(waitlist) - 30} more users"
+    
+    waitlist_text += f"\n\n📊 Total: {len(waitlist)} user(s) waiting"
+    
+    query.edit_message_text(waitlist_text, reply_markup=get_back_admin_keyboard())
+
 def admin_left_users_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
@@ -859,6 +1019,11 @@ def process_admin_text(update: Update, context: CallbackContext) -> None:
         
         clear_user_state(ADMIN_ID)
         update.message.reply_text(result_text, reply_markup=get_back_admin_keyboard())
+        
+        # Process waitlist to auto-assign keys to waiting users
+        if keys_added > 0:
+            process_waitlist(context.bot)
+        
         return
     
     elif state['state'] == 'awaiting_channel':
@@ -968,6 +1133,7 @@ def main():
     dp.add_handler(CallbackQueryHandler(admin_stats_callback, pattern="^admin_stats$"))
     dp.add_handler(CallbackQueryHandler(admin_all_users_callback, pattern="^admin_all_users$"))
     dp.add_handler(CallbackQueryHandler(admin_add_keys_callback, pattern="^admin_add_keys$"))
+    dp.add_handler(CallbackQueryHandler(admin_waitlist_callback, pattern="^admin_waitlist$"))
     dp.add_handler(CallbackQueryHandler(admin_add_channel_callback, pattern="^admin_add_channel$"))
     dp.add_handler(CallbackQueryHandler(admin_remove_channel_callback, pattern="^admin_remove_channel$"))
     dp.add_handler(CallbackQueryHandler(admin_list_channels_callback, pattern="^admin_list_channels$"))
