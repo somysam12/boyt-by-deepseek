@@ -31,18 +31,23 @@ The bot uses SQLite with the following tables:
 ## Features
 
 ### User Features
-- ✅ Channel membership verification
+- ✅ Channel membership verification with inline join buttons
 - 🎁 Key claiming system with cooldown
 - 🔑 Automatic key assignment (FIFO)
+- ⏰ Live cooldown countdown (shows remaining time when trying to claim)
+- 🚫 Blocked user handling with custom messages
 
 ### Admin Features
 - 📊 Bot statistics and analytics
-- 🔑 Bulk key addition
-- 📢 Channel management (add/remove)
-- ⏰ Cooldown configuration
+- 🔑 Flexible key addition (2 formats with hours/days duration)
+- 📢 Channel management (add/remove with inline buttons)
+- ⏰ Cooldown configuration (1-720 hours)
 - 💬 Custom key message templates
-- 👥 User history tracking
-- 🗑 Key management
+- 👥 View all users with IDs and stats
+- 🚪 Track users who left after claiming keys
+- 🚫 Block/Mute users with custom reason messages
+- 📣 Send announcements (text only or with photo)
+- 🗑 Key management (delete all keys)
 
 ## Configuration
 
@@ -60,14 +65,23 @@ The bot uses SQLite with the following tables:
 
 ### For Users
 1. Start the bot with `/start`
-2. Join all required channels
-3. Click "Verify Membership"
-4. Claim your key
+2. Click inline buttons to join all required channels
+3. Click "✅ Verify Membership" button
+4. Click "🎁 Claim Key" to get your key
+5. If cooldown is active, you'll see remaining time in hours:minutes format
 
 ### For Admins
 1. Use `/admin` command to access admin panel
-2. Add keys in format: `key | duration_days | product_name | product_link`
-3. Manage channels and settings through admin interface
+2. **Add Keys** - Two flexible formats:
+   - Format 1: `key | duration | app_name` (e.g., `ABC123 | 7d | Premium`)
+   - Format 2: `key | app_name | duration | link` (e.g., `XYZ789 | Pro | 24h | https://example.com`)
+   - Duration: Use `24h`, `12hours` for hours OR `7d`, `30days` for days
+3. **Manage Channels** - Add/remove verification channels
+4. **Set Cooldown** - Configure cooldown period (1-720 hours)
+5. **Block Users** - Format: `user_id | reason` or `unblock user_id`
+6. **Send Announcements** - Text only or with photo to all users
+7. **Track Users** - View all users, users who left after claiming
+8. **Key Management** - View stats, delete all keys
 
 ## Development Setup
 The bot automatically initializes the database on first run. The Flask server provides health check endpoints at:
@@ -75,12 +89,25 @@ The bot automatically initializes the database on first run. The Flask server pr
 - `/health` - Returns "OK"
 
 ## Recent Changes
-- **2025-10-17**: Initial Replit setup
+- **2025-10-17**: Major feature update and Replit setup
   - Installed Python 3.11 and dependencies
   - Configured secrets (BOT_TOKEN, ADMIN_ID)
   - Set up Flask server on port 5000
   - Created workflow for bot execution
-  - Added .gitignore for Python project
+  - **New Features Added:**
+    - Inline channel join buttons for users
+    - Flexible key addition (2 formats, hours/days support)
+    - Live cooldown countdown display
+    - User tracking (all users, users who left after claiming)
+    - Block/Mute system with custom reasons
+    - Announcement system (text/photo to all users)
+    - Enhanced admin panel with more controls
+    - Better UI/UX with attractive inline buttons
+  - **Database Updates:**
+    - Added `blocked` and `block_reason` fields to users table
+    - Added `left_channel` tracking to sales table
+    - Added `duration_unit` support (hours/days) to keys table
+    - Added `channel_link` field to channels table
 
 ## Notes
 - The bot runs continuously with Flask providing a health check endpoint
