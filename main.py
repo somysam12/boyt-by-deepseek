@@ -7,8 +7,8 @@ from threading import Thread
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
-    filters, ContextTypes, CallbackContext
+    Updater, CommandHandler, CallbackQueryHandler, MessageHandler,
+    Filters, CallbackContext
 )
 from dotenv import load_dotenv
 
@@ -182,28 +182,27 @@ def get_verification_channels() -> List[str]:
     results = db.fetch_all("SELECT username FROM channels")
     return [row[0] for row in results]
 
-async def check_channel_membership(update: Update, channel_username: str) -> bool:
+def check_channel_membership(bot, user_id: int, channel_username: str) -> bool:
     """Check if user is member of a channel"""
     try:
         # Remove @ if present
         if channel_username.startswith('@'):
             channel_username = channel_username[1:]
             
-        user_id = update.effective_user.id
-        chat_member = await update.effective_chat.get_bot().get_chat_member(f"@{channel_username}", user_id)
+        chat_member = bot.get_chat_member(chat_id=f"@{channel_username}", user_id=user_id)
         return chat_member.status in ['member', 'administrator', 'creator']
     except Exception as e:
         logger.error(f"Error checking membership for {channel_username}: {e}")
         return False
 
-async def verify_all_channels(update: Update) -> bool:
+def verify_all_channels(bot, user_id: int) -> bool:
     """Verify user membership in all required channels"""
     channels = get_verification_channels()
     if not channels:
         return True  # No channels to verify
     
     for channel in channels:
-        if not await check_channel_membership(update, channel):
+        if not check_channel_membership(bot, user_id, channel):
             return False
     return True
 
@@ -346,7 +345,7 @@ def get_confirm_delete_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 # User handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def start(update: Update, context: CallbackContext) -> None:
     """Handle /start command"""
     user_id = update.effective_user.id
     username = update.effective_user.username
@@ -366,12 +365,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             welcome_text += f"{i}. @{channel}\n"
     
     keyboard = get_main_keyboard()
-    await update.message.reply_text(welcome_text, reply_markup=keyboard)
+    update.message.reply_text(welcome_text, reply_markup=keyboard)
 
-async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def verify_callback(update: Update, context: CallbackContext) -> None:
     """Handle verification check"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     user_id = query.from_user.id
     username = query.from_user.username
@@ -380,33 +379,33 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     channels = get_verification_channels()
     if not channels:
-        await query.edit_message_text(
+        query.edit_message_text(
             "✅ No verification channels required. You're automatically verified!",
             reply_markup=get_main_keyboard()
         )
         return
     
     # Check membership in all channels
-    is_member = await verify_all_channels(update)
+    is_member = verify_all_channels(context.bot, user_id)
     
     if is_member:
         db.execute_query("UPDATE users SET verified = TRUE WHERE user_id = ?", (user_id,))
-        await query.edit_message_text(
+        query.edit_message_text(
             "✅ Verification successful! You've joined all required channels.\n\nYou can now claim your key!",
             reply_markup=get_main_keyboard()
         )
     else:
         channel_links = "\n".join([f"• @{channel}" for channel in channels])
-        await query.edit_message_text(
+        query.edit_message_text(
             f"❌ Please join all required channels:\n\n{channel_links}\n\n"
             "After joining, click Verify Membership again.",
             reply_markup=get_main_keyboard()
         )
 
-async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def claim_callback(update: Update, context: CallbackContext) -> None:
     """Handle key claim process"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     user_id = query.from_user.id
     username = query.from_user.username
@@ -416,13 +415,13 @@ async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     can_claim, reason = can_claim_key(user_id)
     
     if not can_claim:
-        await query.answer(reason, show_alert=True)
+        query.answer(reason, show_alert=True)
         return
     
     # Assign key
     key_data = get_available_key()
     if not key_data:
-        await query.answer("No keys available!", show_alert=True)
+        query.answer("No keys available!", show_alert=True)
         return
     
     assigned_key = assign_key_to_user(user_id, username, key_data)
@@ -436,40 +435,40 @@ async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         link=assigned_key['link']
     )
     
-    await query.edit_message_text(
+    query.edit_message_text(
         key_message + f"\n\n⏰ Expires: {assigned_key['expires_at'].strftime('%Y-%m-%d %H:%M')}",
         reply_markup=get_main_keyboard()
     )
 
 # Admin handlers
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_command(update: Update, context: CallbackContext) -> None:
     """Handle /admin command"""
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Access denied.")
+        update.message.reply_text("❌ Access denied.")
         return
     
     admin_text = "👨‍💼 Admin Panel\n\nSelect an option below:"
-    await update.message.reply_text(admin_text, reply_markup=get_admin_keyboard())
+    update.message.reply_text(admin_text, reply_markup=get_admin_keyboard())
 
-async def admin_back_main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_back_main_callback(update: Update, context: CallbackContext) -> None:
     """Return to main admin panel"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     admin_text = "👨‍💼 Admin Panel\n\nSelect an option below:"
-    await query.edit_message_text(admin_text, reply_markup=get_admin_keyboard())
+    query.edit_message_text(admin_text, reply_markup=get_admin_keyboard())
 
-async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_stats_callback(update: Update, context: CallbackContext) -> None:
     """Show bot statistics"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     stats = get_bot_stats()
@@ -498,15 +497,15 @@ Recent Claims:
         hours_ago = int(time_ago.total_seconds() // 3600)
         stats_text += f"• {username}: {key_text} ({hours_ago}h ago)\n"
     
-    await query.edit_message_text(stats_text, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(stats_text, reply_markup=get_back_admin_keyboard())
 
-async def admin_add_keys_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_add_keys_callback(update: Update, context: CallbackContext) -> None:
     """Show add keys interface"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     instructions = """
@@ -522,9 +521,9 @@ XYZ-123 | 7 | Basic | https://example.com/basic
 You can send multiple keys at once.
 """
     
-    await query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
 
-async def process_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def process_admin_text(update: Update, context: CallbackContext) -> None:
     """Process admin text commands"""
     if update.effective_user.id != ADMIN_ID:
         return
@@ -563,7 +562,7 @@ async def process_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if keys_duplicate > 0:
             result_text += f"\n❌ {keys_duplicate} duplicate keys skipped"
         
-        await update.message.reply_text(result_text, reply_markup=get_back_admin_keyboard())
+        update.message.reply_text(result_text, reply_markup=get_back_admin_keyboard())
         return
     
     # Process channel addition/removal
@@ -579,36 +578,36 @@ async def process_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if channel_username in channels:
             # Remove channel
             db.execute_query("DELETE FROM channels WHERE username = ?", (channel_username,))
-            await update.message.reply_text(f"✅ Channel @{channel_username} removed successfully!", reply_markup=get_back_admin_keyboard())
+            update.message.reply_text(f"✅ Channel @{channel_username} removed successfully!", reply_markup=get_back_admin_keyboard())
         else:
             # Add channel
             try:
                 db.execute_query("INSERT INTO channels (username) VALUES (?)", (channel_username,))
-                await update.message.reply_text(f"✅ Channel @{channel_username} added successfully!", reply_markup=get_back_admin_keyboard())
+                update.message.reply_text(f"✅ Channel @{channel_username} added successfully!", reply_markup=get_back_admin_keyboard())
             except sqlite3.IntegrityError:
-                await update.message.reply_text(f"❌ Channel @{channel_username} already exists!", reply_markup=get_back_admin_keyboard())
+                update.message.reply_text(f"❌ Channel @{channel_username} already exists!", reply_markup=get_back_admin_keyboard())
         return
     
     # Process cooldown setting
     if text.isdigit() and 1 <= int(text) <= 720:
         db.execute_query("UPDATE settings SET value = ? WHERE key = 'cooldown_hours'", (text,))
-        await update.message.reply_text(f"✅ Cooldown set to {text} hours!", reply_markup=get_back_admin_keyboard())
+        update.message.reply_text(f"✅ Cooldown set to {text} hours!", reply_markup=get_back_admin_keyboard())
         return
     
     # Process key message setting
     if text and '{key}' in text and not text.startswith('/') and '|' not in text:
         db.execute_query("UPDATE settings SET value = ? WHERE key = 'key_message'", (text,))
-        await update.message.reply_text("✅ Key message updated successfully!", reply_markup=get_back_admin_keyboard())
+        update.message.reply_text("✅ Key message updated successfully!", reply_markup=get_back_admin_keyboard())
         return
 
-# Other admin callback handlers (similar pattern)
-async def admin_add_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Other admin callback handlers
+def admin_add_channel_callback(update: Update, context: CallbackContext) -> None:
     """Show add channel interface"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     instructions = """
@@ -619,20 +618,20 @@ Send the channel username (without @):
 Example: mychannel
 """
     
-    await query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
 
-async def admin_remove_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_remove_channel_callback(update: Update, context: CallbackContext) -> None:
     """Show remove channel interface"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     channels = get_verification_channels()
     if not channels:
-        await query.edit_message_text("No channels to remove.", reply_markup=get_back_admin_keyboard())
+        query.edit_message_text("No channels to remove.", reply_markup=get_back_admin_keyboard())
         return
     
     channels_text = "\n".join([f"• @{channel}" for channel in channels])
@@ -645,15 +644,15 @@ Current channels:
 Send the channel username to remove (without @):
 """
     
-    await query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
 
-async def admin_list_channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_list_channels_callback(update: Update, context: CallbackContext) -> None:
     """List all verification channels"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     channels = get_verification_channels()
@@ -662,15 +661,15 @@ async def admin_list_channels_callback(update: Update, context: ContextTypes.DEF
     else:
         channels_text = "Current verification channels:\n\n" + "\n".join([f"• @{channel}" for channel in channels])
     
-    await query.edit_message_text(channels_text, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(channels_text, reply_markup=get_back_admin_keyboard())
 
-async def admin_set_cooldown_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_set_cooldown_callback(update: Update, context: CallbackContext) -> None:
     """Set cooldown period"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     current_cooldown = get_cooldown_hours()
@@ -684,15 +683,15 @@ Send the new cooldown period in hours (number only):
 Example: 24
 """
     
-    await query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
 
-async def admin_set_key_msg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_set_key_msg_callback(update: Update, context: CallbackContext) -> None:
     """Set key assignment message"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     current_msg = get_key_message()
@@ -711,15 +710,15 @@ Available placeholders:
 Send the new message:
 """
     
-    await query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
 
-async def admin_delete_all_keys_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_delete_all_keys_callback(update: Update, context: CallbackContext) -> None:
     """Confirm delete all keys"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     stats = get_bot_stats()
@@ -735,38 +734,38 @@ This action cannot be undone!
 Are you sure you want to delete ALL keys?
 """
     
-    await query.edit_message_text(warning_text, reply_markup=get_confirm_delete_keyboard())
+    query.edit_message_text(warning_text, reply_markup=get_confirm_delete_keyboard())
 
-async def confirm_delete_all_keys_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def confirm_delete_all_keys_callback(update: Update, context: CallbackContext) -> None:
     """Confirm and delete all keys"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     db.execute_query("DELETE FROM keys")
-    await query.edit_message_text("✅ All keys have been deleted successfully!", reply_markup=get_back_admin_keyboard())
+    query.edit_message_text("✅ All keys have been deleted successfully!", reply_markup=get_back_admin_keyboard())
 
-async def cancel_delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def cancel_delete_callback(update: Update, context: CallbackContext) -> None:
     """Cancel deletion"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
-    await query.edit_message_text("❌ Deletion cancelled.", reply_markup=get_back_admin_keyboard())
+    query.edit_message_text("❌ Deletion cancelled.", reply_markup=get_back_admin_keyboard())
 
-async def admin_user_history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def admin_user_history_callback(update: Update, context: CallbackContext) -> None:
     """Show user claim history interface"""
     query = update.callback_query
-    await query.answer()
+    query.answer()
     
     if query.from_user.id != ADMIN_ID:
-        await query.answer("Access denied", show_alert=True)
+        query.answer("Access denied", show_alert=True)
         return
     
     # Get recent claims
@@ -790,35 +789,36 @@ async def admin_user_history_callback(update: Update, context: ContextTypes.DEFA
             history_text += f"🔑 {key_text} | {product}\n"
             history_text += f"⏰ {hours_ago}h ago\n\n"
     
-    await query.edit_message_text(history_text, reply_markup=get_back_admin_keyboard())
+    query.edit_message_text(history_text, reply_markup=get_back_admin_keyboard())
 
 def main() -> None:
     """Start the bot."""
-    # Create the Application
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Create the Updater
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
     # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("admin", admin_command))
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("admin", admin_command))
     
     # Callback query handlers
-    application.add_handler(CallbackQueryHandler(verify_callback, pattern="^verify$"))
-    application.add_handler(CallbackQueryHandler(claim_callback, pattern="^start_claim$"))
-    application.add_handler(CallbackQueryHandler(admin_back_main_callback, pattern="^admin_back_main$"))
-    application.add_handler(CallbackQueryHandler(admin_stats_callback, pattern="^admin_stats$"))
-    application.add_handler(CallbackQueryHandler(admin_add_keys_callback, pattern="^admin_add_keys$"))
-    application.add_handler(CallbackQueryHandler(admin_add_channel_callback, pattern="^admin_add_channel$"))
-    application.add_handler(CallbackQueryHandler(admin_remove_channel_callback, pattern="^admin_remove_channel$"))
-    application.add_handler(CallbackQueryHandler(admin_list_channels_callback, pattern="^admin_list_channels$"))
-    application.add_handler(CallbackQueryHandler(admin_set_cooldown_callback, pattern="^admin_set_cooldown$"))
-    application.add_handler(CallbackQueryHandler(admin_set_key_msg_callback, pattern="^admin_set_key_msg$"))
-    application.add_handler(CallbackQueryHandler(admin_delete_all_keys_callback, pattern="^admin_delete_all_keys$"))
-    application.add_handler(CallbackQueryHandler(confirm_delete_all_keys_callback, pattern="^confirm_delete_all_keys$"))
-    application.add_handler(CallbackQueryHandler(cancel_delete_callback, pattern="^cancel_delete$"))
-    application.add_handler(CallbackQueryHandler(admin_user_history_callback, pattern="^admin_user_history$"))
+    dispatcher.add_handler(CallbackQueryHandler(verify_callback, pattern="^verify$"))
+    dispatcher.add_handler(CallbackQueryHandler(claim_callback, pattern="^start_claim$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_back_main_callback, pattern="^admin_back_main$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_stats_callback, pattern="^admin_stats$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_add_keys_callback, pattern="^admin_add_keys$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_add_channel_callback, pattern="^admin_add_channel$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_remove_channel_callback, pattern="^admin_remove_channel$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_list_channels_callback, pattern="^admin_list_channels$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_set_cooldown_callback, pattern="^admin_set_cooldown$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_set_key_msg_callback, pattern="^admin_set_key_msg$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_delete_all_keys_callback, pattern="^admin_delete_all_keys$"))
+    dispatcher.add_handler(CallbackQueryHandler(confirm_delete_all_keys_callback, pattern="^confirm_delete_all_keys$"))
+    dispatcher.add_handler(CallbackQueryHandler(cancel_delete_callback, pattern="^cancel_delete$"))
+    dispatcher.add_handler(CallbackQueryHandler(admin_user_history_callback, pattern="^admin_user_history$"))
     
     # Admin text message handler
-    application.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_ID), process_admin_text))
+    dispatcher.add_handler(MessageHandler(Filters.text & Filters.user(ADMIN_ID), process_admin_text))
 
     # Start Flask server in a separate thread
     flask_thread = Thread(target=run_flask)
@@ -827,7 +827,8 @@ def main() -> None:
 
     # Start the Bot
     logger.info("Bot started!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
