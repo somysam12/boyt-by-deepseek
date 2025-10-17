@@ -456,7 +456,8 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📋 List Channels", callback_data="admin_list_channels")],
         [InlineKeyboardButton("⏰ Set Cooldown", callback_data="admin_set_cooldown"),
          InlineKeyboardButton("💬 Set Key Message", callback_data="admin_set_key_msg")],
-        [InlineKeyboardButton("🚫 Block/Mute User", callback_data="admin_block_user")],
+        [InlineKeyboardButton("🔄 Reset Cooldown", callback_data="admin_reset_cooldown"),
+         InlineKeyboardButton("🚫 Block/Mute User", callback_data="admin_block_user")],
         [InlineKeyboardButton("📣 Send Announcement", callback_data="admin_announcement")],
         [InlineKeyboardButton("🚪 Users Who Left", callback_data="admin_left_users"),
          InlineKeyboardButton("❌ Delete All Keys", callback_data="admin_delete_all_keys")]
@@ -565,7 +566,13 @@ def claim_callback(update: Update, context: CallbackContext) -> None:
             seconds_left = int(time_left.total_seconds())
             hours = seconds_left // 3600
             minutes = (seconds_left % 3600) // 60
-            query.answer(f"⏳ Cooldown active!\n\n⏰ Time left: {hours}h {minutes}m", show_alert=True)
+            
+            cooldown_msg = f"⏰ Please wait for the cooldown to finish!\n\n"
+            cooldown_msg += f"🕐 Time Remaining: {hours} hours {minutes} minutes\n\n"
+            cooldown_msg += f"⏳ You can claim your next key at:\n"
+            cooldown_msg += f"📅 {next_claim.strftime('%Y-%m-%d %H:%M')}"
+            
+            query.answer(cooldown_msg, show_alert=True)
             return
     
     # Check for available keys
@@ -843,6 +850,28 @@ unblock 123456789
     set_user_state(ADMIN_ID, 'awaiting_block')
     query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
 
+def admin_reset_cooldown_callback(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    
+    if query.from_user.id != ADMIN_ID:
+        query.answer("Access denied", show_alert=True)
+        return
+    
+    instructions = """
+🔄 Reset User Cooldown
+
+Send the user ID to reset their cooldown:
+
+Example:
+123456789
+
+This will allow the user to claim a key immediately.
+"""
+    
+    set_user_state(ADMIN_ID, 'awaiting_cooldown_reset')
+    query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
+
 def admin_announcement_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
@@ -1078,6 +1107,22 @@ def process_admin_text(update: Update, context: CallbackContext) -> None:
             update.message.reply_text("❌ Invalid format. Use: user_id | reason", reply_markup=get_back_admin_keyboard())
         return
     
+    elif state['state'] == 'awaiting_cooldown_reset':
+        if text.isdigit():
+            user_id_to_reset = int(text)
+            # Check if user exists
+            user = get_user_data(user_id_to_reset)
+            if user:
+                # Reset cooldown by setting last_key_time to NULL
+                db.execute_query("UPDATE users SET last_key_time = NULL WHERE user_id = ?", (user_id_to_reset,))
+                clear_user_state(ADMIN_ID)
+                update.message.reply_text(f"✅ Cooldown reset for user {user_id_to_reset}!\n\nUser can now claim a key immediately.", reply_markup=get_back_admin_keyboard())
+            else:
+                update.message.reply_text(f"❌ User {user_id_to_reset} not found in database!", reply_markup=get_back_admin_keyboard())
+        else:
+            update.message.reply_text("❌ Please send a valid user ID (numbers only).", reply_markup=get_back_admin_keyboard())
+        return
+    
     elif state['state'] == 'awaiting_announcement_text':
         all_users = db.fetch_all("SELECT user_id FROM users")
         sent = 0
@@ -1139,6 +1184,7 @@ def main():
     dp.add_handler(CallbackQueryHandler(admin_list_channels_callback, pattern="^admin_list_channels$"))
     dp.add_handler(CallbackQueryHandler(admin_set_cooldown_callback, pattern="^admin_set_cooldown$"))
     dp.add_handler(CallbackQueryHandler(admin_set_key_msg_callback, pattern="^admin_set_key_msg$"))
+    dp.add_handler(CallbackQueryHandler(admin_reset_cooldown_callback, pattern="^admin_reset_cooldown$"))
     dp.add_handler(CallbackQueryHandler(admin_block_user_callback, pattern="^admin_block_user$"))
     dp.add_handler(CallbackQueryHandler(admin_announcement_callback, pattern="^admin_announcement$"))
     dp.add_handler(CallbackQueryHandler(announce_text_callback, pattern="^announce_text$"))
