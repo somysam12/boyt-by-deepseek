@@ -1293,10 +1293,21 @@ def main():
         updater.start_polling()
         updater.idle()
 
+# Initialize bot at module level (for Gunicorn)
+updater = None
+dp = None
+
+def init_bot():
+    """Initialize bot handlers - called at module load"""
+    global updater, dp
+    if updater is None:
+        main()
+
 # Webhook endpoint for Render deployment
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle incoming webhook updates from Telegram"""
+    init_bot()  # Ensure bot is initialized
     try:
         update = Update.de_json(request.get_json(force=True), updater.bot)
         dp.process_update(update)
@@ -1305,14 +1316,11 @@ def webhook():
         logger.error(f"Webhook error: {e}")
         return 'error', 500
 
-# Global variables for webhook mode
-updater = None
-dp = None
+# Initialize bot when module loads (for Gunicorn)
+init_bot()
 
 if __name__ == '__main__':
-    # Initialize bot handlers
-    main()
-    
-    # If WEBHOOK_URL is set, run Flask (Gunicorn will use this)
-    if os.getenv('WEBHOOK_URL'):
-        app.run(host='0.0.0.0', port=PORT)
+    # For direct Python execution (not needed for Gunicorn)
+    if not os.getenv('WEBHOOK_URL'):
+        # This won't run on Render, only locally
+        pass
