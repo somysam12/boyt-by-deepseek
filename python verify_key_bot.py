@@ -5,11 +5,12 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional, Dict, Any
 
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram.utils.markdown import hbold, hcode, hlink
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.markdown import text, bold, code, pre
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.utils import executor
 from dotenv import load_dotenv
 import aiohttp
 from aiohttp import web
@@ -20,12 +21,13 @@ load_dotenv()
 # Configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
-PORT = int(os.getenv('PORT', 10000))  # Render uses port 10000
-DATABASE_PATH = 'bot_database.db'
+PORT = int(os.getenv('PORT', 10000))
+DATABASE_PATH = '/tmp/bot_database.db'
 
-# Initialize bot and dispatcher
+# Initialize bot and dispatcher with memory storage
+storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot, storage=storage)
 
 # Configure logging
 logging.basicConfig(
@@ -301,50 +303,46 @@ async def get_bot_stats() -> Dict[str, Any]:
 # Keyboard builders
 def get_main_keyboard() -> InlineKeyboardMarkup:
     """Get main menu keyboard"""
-    builder = InlineKeyboardBuilder()
-    builder.add(
-        InlineKeyboardButton(text="✅ Verify Membership", callback_data="verify"),
-        InlineKeyboardButton(text="🎁 Claim Key", callback_data="start_claim")
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("✅ Verify Membership", callback_data="verify"),
+        InlineKeyboardButton("🎁 Claim Key", callback_data="start_claim")
     )
-    return builder.as_markup()
+    return keyboard
 
 def get_admin_keyboard() -> InlineKeyboardMarkup:
     """Get admin panel keyboard"""
-    builder = InlineKeyboardBuilder()
-    buttons = [
-        InlineKeyboardButton(text="📊 Statistics", callback_data="admin_stats"),
-        InlineKeyboardButton(text="🔑 Add Keys", callback_data="admin_add_keys"),
-        InlineKeyboardButton(text="📢 Add Channel", callback_data="admin_add_channel"),
-        InlineKeyboardButton(text="🗑 Remove Channel", callback_data="admin_remove_channel"),
-        InlineKeyboardButton(text="📋 List Channels", callback_data="admin_list_channels"),
-        InlineKeyboardButton(text="⏰ Set Cooldown", callback_data="admin_set_cooldown"),
-        InlineKeyboardButton(text="💬 Set Key Message", callback_data="admin_set_key_msg"),
-        InlineKeyboardButton(text="❌ Delete All Keys", callback_data="admin_delete_all_keys"),
-        InlineKeyboardButton(text="👥 User History", callback_data="admin_user_history")
-    ]
-    
-    for button in buttons:
-        builder.add(button)
-    builder.adjust(2)
-    return builder.as_markup()
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("📊 Statistics", callback_data="admin_stats"),
+        InlineKeyboardButton("🔑 Add Keys", callback_data="admin_add_keys"),
+        InlineKeyboardButton("📢 Add Channel", callback_data="admin_add_channel"),
+        InlineKeyboardButton("🗑 Remove Channel", callback_data="admin_remove_channel"),
+        InlineKeyboardButton("📋 List Channels", callback_data="admin_list_channels"),
+        InlineKeyboardButton("⏰ Set Cooldown", callback_data="admin_set_cooldown"),
+        InlineKeyboardButton("💬 Set Key Message", callback_data="admin_set_key_msg"),
+        InlineKeyboardButton("❌ Delete All Keys", callback_data="admin_delete_all_keys"),
+        InlineKeyboardButton("👥 User History", callback_data="admin_user_history")
+    )
+    return keyboard
 
 def get_back_admin_keyboard() -> InlineKeyboardMarkup:
     """Get back to admin panel keyboard"""
-    builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back_main"))
-    return builder.as_markup()
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back_main"))
+    return keyboard
 
 def get_confirm_delete_keyboard() -> InlineKeyboardMarkup:
     """Get confirmation keyboard for delete operation"""
-    builder = InlineKeyboardBuilder()
-    builder.add(
-        InlineKeyboardButton(text="✅ Confirm Delete", callback_data="confirm_delete_all_keys"),
-        InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_delete")
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton("✅ Confirm Delete", callback_data="confirm_delete_all_keys"),
+        InlineKeyboardButton("❌ Cancel", callback_data="cancel_delete")
     )
-    return builder.as_markup()
+    return keyboard
 
 # User handlers
-@dp.message(Command("start"))
+@dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     """Handle /start command"""
     user_id = message.from_user.id
@@ -367,17 +365,17 @@ async def cmd_start(message: types.Message):
     keyboard = get_main_keyboard()
     await message.answer(welcome_text, reply_markup=keyboard)
 
-@dp.callback_query(F.data == "verify")
-async def process_verify(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "verify")
+async def process_verify(callback_query: types.CallbackQuery):
     """Handle verification check"""
-    user_id = callback.from_user.id
-    username = callback.from_user.username
+    user_id = callback_query.from_user.id
+    username = callback_query.from_user.username
     
     await update_user(user_id, username)
     
     channels = await get_verification_channels()
     if not channels:
-        await callback.message.edit_text(
+        await callback_query.message.edit_text(
             "✅ No verification channels required. You're automatically verified!",
             reply_markup=get_main_keyboard()
         )
@@ -388,36 +386,36 @@ async def process_verify(callback: CallbackQuery):
     
     if is_member:
         await db.execute_query("UPDATE users SET verified = TRUE WHERE user_id = ?", (user_id,))
-        await callback.message.edit_text(
+        await callback_query.message.edit_text(
             "✅ Verification successful! You've joined all required channels.\n\nYou can now claim your key!",
             reply_markup=get_main_keyboard()
         )
     else:
         channel_links = "\n".join([f"• @{channel}" for channel in channels])
-        await callback.message.edit_text(
+        await callback_query.message.edit_text(
             f"❌ Please join all required channels:\n\n{channel_links}\n\n"
             "After joining, click Verify Membership again.",
             reply_markup=get_main_keyboard()
         )
 
-@dp.callback_query(F.data == "start_claim")
-async def process_claim(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "start_claim")
+async def process_claim(callback_query: types.CallbackQuery):
     """Handle key claim process"""
-    user_id = callback.from_user.id
-    username = callback.from_user.username
+    user_id = callback_query.from_user.id
+    username = callback_query.from_user.username
     
     await update_user(user_id, username)
     
     can_claim, reason = await can_claim_key(user_id)
     
     if not can_claim:
-        await callback.answer(reason, show_alert=True)
+        await callback_query.answer(reason, show_alert=True)
         return
     
     # Assign key
     key_data = await get_available_key()
     if not key_data:
-        await callback.answer("No keys available!", show_alert=True)
+        await callback_query.answer("No keys available!", show_alert=True)
         return
     
     assigned_key = await assign_key_to_user(user_id, username, key_data)
@@ -431,13 +429,13 @@ async def process_claim(callback: CallbackQuery):
         link=assigned_key['link']
     )
     
-    await callback.message.edit_text(
+    await callback_query.message.edit_text(
         key_message + f"\n\n⏰ Expires: {assigned_key['expires_at'].strftime('%Y-%m-%d %H:%M')}",
         reply_markup=get_main_keyboard()
     )
 
 # Admin handlers
-@dp.message(Command("admin"))
+@dp.message_handler(commands=['admin'])
 async def cmd_admin(message: types.Message):
     """Handle /admin command"""
     if message.from_user.id != ADMIN_ID:
@@ -447,21 +445,21 @@ async def cmd_admin(message: types.Message):
     admin_text = "👨‍💼 Admin Panel\n\nSelect an option below:"
     await message.answer(admin_text, reply_markup=get_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_back_main")
-async def admin_back_main(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_back_main")
+async def admin_back_main(callback_query: types.CallbackQuery):
     """Return to main admin panel"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     admin_text = "👨‍💼 Admin Panel\n\nSelect an option below:"
-    await callback.message.edit_text(admin_text, reply_markup=get_admin_keyboard())
+    await callback_query.message.edit_text(admin_text, reply_markup=get_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_stats")
-async def admin_stats(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_stats")
+async def admin_stats(callback_query: types.CallbackQuery):
     """Show bot statistics"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     stats = await get_bot_stats()
@@ -490,13 +488,13 @@ Recent Claims:
         hours_ago = int(time_ago.total_seconds() // 3600)
         stats_text += f"• {username}: {key_text} ({hours_ago}h ago)\n"
     
-    await callback.message.edit_text(stats_text, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(stats_text, reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_add_keys")
-async def admin_add_keys(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_add_keys")
+async def admin_add_keys(callback_query: types.CallbackQuery):
     """Show add keys interface"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     instructions = """
@@ -512,9 +510,9 @@ XYZ-123 | 7 | Basic | https://example.com/basic
 You can send multiple keys at once.
 """
     
-    await callback.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
 
-@dp.message(F.text & F.from_user.id == ADMIN_ID)
+@dp.message_handler(lambda message: message.from_user.id == ADMIN_ID)
 async def process_admin_text(message: types.Message):
     """Process admin text commands"""
     text = message.text.strip()
@@ -589,11 +587,11 @@ async def process_admin_text(message: types.Message):
         await message.answer("✅ Key message updated successfully!", reply_markup=get_back_admin_keyboard())
         return
 
-@dp.callback_query(F.data == "admin_add_channel")
-async def admin_add_channel(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_add_channel")
+async def admin_add_channel(callback_query: types.CallbackQuery):
     """Show add channel interface"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     instructions = """
@@ -604,18 +602,18 @@ Send the channel username (without @):
 Example: mychannel
 """
     
-    await callback.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_remove_channel")
-async def admin_remove_channel(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_remove_channel")
+async def admin_remove_channel(callback_query: types.CallbackQuery):
     """Show remove channel interface"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     channels = await get_verification_channels()
     if not channels:
-        await callback.message.edit_text("No channels to remove.", reply_markup=get_back_admin_keyboard())
+        await callback_query.message.edit_text("No channels to remove.", reply_markup=get_back_admin_keyboard())
         return
     
     channels_text = "\n".join([f"• @{channel}" for channel in channels])
@@ -628,13 +626,13 @@ Current channels:
 Send the channel username to remove (without @):
 """
     
-    await callback.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_list_channels")
-async def admin_list_channels(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_list_channels")
+async def admin_list_channels(callback_query: types.CallbackQuery):
     """List all verification channels"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     channels = await get_verification_channels()
@@ -643,13 +641,13 @@ async def admin_list_channels(callback: CallbackQuery):
     else:
         channels_text = "Current verification channels:\n\n" + "\n".join([f"• @{channel}" for channel in channels])
     
-    await callback.message.edit_text(channels_text, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(channels_text, reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_set_cooldown")
-async def admin_set_cooldown(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_set_cooldown")
+async def admin_set_cooldown(callback_query: types.CallbackQuery):
     """Set cooldown period"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     current_cooldown = await get_cooldown_hours()
@@ -663,13 +661,13 @@ Send the new cooldown period in hours (number only):
 Example: 24
 """
     
-    await callback.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_set_key_msg")
-async def admin_set_key_msg(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_set_key_msg")
+async def admin_set_key_msg(callback_query: types.CallbackQuery):
     """Set key assignment message"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     current_msg = await get_key_message()
@@ -688,13 +686,13 @@ Available placeholders:
 Send the new message:
 """
     
-    await callback.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(instructions, reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_delete_all_keys")
-async def admin_delete_all_keys(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_delete_all_keys")
+async def admin_delete_all_keys(callback_query: types.CallbackQuery):
     """Confirm delete all keys"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     stats = await get_bot_stats()
@@ -710,32 +708,32 @@ This action cannot be undone!
 Are you sure you want to delete ALL keys?
 """
     
-    await callback.message.edit_text(warning_text, reply_markup=get_confirm_delete_keyboard())
+    await callback_query.message.edit_text(warning_text, reply_markup=get_confirm_delete_keyboard())
 
-@dp.callback_query(F.data == "confirm_delete_all_keys")
-async def confirm_delete_all_keys(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "confirm_delete_all_keys")
+async def confirm_delete_all_keys(callback_query: types.CallbackQuery):
     """Confirm and delete all keys"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     await db.execute_query("DELETE FROM keys")
-    await callback.message.edit_text("✅ All keys have been deleted successfully!", reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text("✅ All keys have been deleted successfully!", reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "cancel_delete")
-async def cancel_delete(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "cancel_delete")
+async def cancel_delete(callback_query: types.CallbackQuery):
     """Cancel deletion"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
-    await callback.message.edit_text("❌ Deletion cancelled.", reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text("❌ Deletion cancelled.", reply_markup=get_back_admin_keyboard())
 
-@dp.callback_query(F.data == "admin_user_history")
-async def admin_user_history(callback: CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "admin_user_history")
+async def admin_user_history(callback_query: types.CallbackQuery):
     """Show user claim history interface"""
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Access denied", show_alert=True)
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("Access denied", show_alert=True)
         return
     
     # Get recent claims
@@ -759,15 +757,13 @@ async def admin_user_history(callback: CallbackQuery):
             history_text += f"🔑 {key_text} | {product}\n"
             history_text += f"⏰ {hours_ago}h ago\n\n"
     
-    await callback.message.edit_text(history_text, reply_markup=get_back_admin_keyboard())
+    await callback_query.message.edit_text(history_text, reply_markup=get_back_admin_keyboard())
 
-# Web server for Render.com compatibility
+# Web server for Render.com
 async def handle_health_check(request):
-    """Health check endpoint for Render"""
     return web.Response(text="Bot is running!")
 
 async def start_web_server():
-    """Start web server for Render compatibility"""
     app = web.Application()
     app.router.add_get('/', handle_health_check)
     app.router.add_get('/health', handle_health_check)
@@ -775,7 +771,6 @@ async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
     
-    # Use port from environment variable or default to 10000 (Render's preferred port)
     port = int(os.getenv('PORT', 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     
@@ -783,23 +778,16 @@ async def start_web_server():
     logger.info(f"Web server started on port {port}")
     return runner
 
-async def main():
-    """Main function with Render compatibility"""
-    logger.info("Starting bot on Render.com...")
-    
-    # Start web server first (required for Render)
-    web_runner = await start_web_server()
-    
-    try:
-        # Start bot polling
-        logger.info("Starting bot polling...")
-        await dp.start_polling(bot)
-    except Exception as e:
-        logger.error(f"Bot error: {e}")
-    finally:
-        # Cleanup
-        await web_runner.cleanup()
+async def on_startup(dp):
+    """Function to run on bot startup"""
+    logger.info("Bot started!")
+    await start_web_server()
+
+async def on_shutdown(dp):
+    """Function to run on bot shutdown"""
+    logger.info("Bot shutting down...")
+    await bot.close()
 
 if __name__ == "__main__":
-    # Run the bot
-    asyncio.run(main())
+    # Start the bot
+    executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown, skip_updates=True)
