@@ -108,7 +108,18 @@ The bot automatically initializes the database on first run. The Flask server pr
 - `/health` - Returns "OK"
 
 ## Recent Changes
-- **2025-10-17 (Latest Update)**: Admin panel improvements
+- **2025-10-17 (Latest Update)**: Render deployment support added
+  - **Webhook Mode Support:**
+    - Bot now supports both polling (Replit) and webhook (Render) modes
+    - Automatically detects WEBHOOK_URL environment variable
+    - Added `/webhook` endpoint for Telegram updates
+    - Gunicorn ready for production deployment
+  - **Deployment Ready:**
+    - Updated requirements.txt with gunicorn==21.2.0
+    - Flask request import added for webhook handling
+    - Smart mode switching based on environment
+
+- **2025-10-17**: Admin panel improvements
   - **Reset All Cooldown Feature:**
     - Added "🔄 Reset All Cooldown" button to reset cooldown for all users at once
     - Includes confirmation dialog to prevent accidental resets

@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional, Dict, Any
 from threading import Thread
-from flask import Flask
+from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler,
@@ -1243,6 +1243,7 @@ def process_admin_photo(update: Update, context: CallbackContext) -> None:
 
 # Main function
 def main():
+    global updater, dp
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
 
@@ -1277,11 +1278,41 @@ def main():
     dp.add_handler(MessageHandler(Filters.text & Filters.user(ADMIN_ID), process_admin_text))
     dp.add_handler(MessageHandler(Filters.photo & Filters.user(ADMIN_ID), process_admin_photo))
 
-    Thread(target=run_flask, daemon=True).start()
+    # Check if running on Render (webhook mode) or locally (polling mode)
+    webhook_url = os.getenv('WEBHOOK_URL')
     
-    logger.info("Bot started!")
-    updater.start_polling()
-    updater.idle()
+    if webhook_url:
+        # Webhook mode for Render
+        updater.bot.set_webhook(url=f"{webhook_url}/webhook")
+        logger.info(f"Bot started in WEBHOOK mode!")
+        logger.info(f"Webhook URL: {webhook_url}/webhook")
+    else:
+        # Polling mode for local development (Replit)
+        Thread(target=run_flask, daemon=True).start()
+        logger.info("Bot started in POLLING mode!")
+        updater.start_polling()
+        updater.idle()
+
+# Webhook endpoint for Render deployment
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Handle incoming webhook updates from Telegram"""
+    try:
+        update = Update.de_json(request.get_json(force=True), updater.bot)
+        dp.process_update(update)
+        return 'ok', 200
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return 'error', 500
+
+# Global variables for webhook mode
+updater = None
+dp = None
 
 if __name__ == '__main__':
+    # Initialize bot handlers
     main()
+    
+    # If WEBHOOK_URL is set, run Flask (Gunicorn will use this)
+    if os.getenv('WEBHOOK_URL'):
+        app.run(host='0.0.0.0', port=PORT)
