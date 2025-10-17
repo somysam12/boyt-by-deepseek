@@ -456,8 +456,10 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📋 List Channels", callback_data="admin_list_channels")],
         [InlineKeyboardButton("⏰ Set Cooldown", callback_data="admin_set_cooldown"),
          InlineKeyboardButton("💬 Set Key Message", callback_data="admin_set_key_msg")],
-        [InlineKeyboardButton("🔄 Reset Cooldown", callback_data="admin_reset_cooldown"),
-         InlineKeyboardButton("🚫 Block/Mute User", callback_data="admin_block_user")],
+        [InlineKeyboardButton("🔄 Reset Cooldown (User)", callback_data="admin_reset_cooldown"),
+         InlineKeyboardButton("🔄 Reset All Cooldown", callback_data="admin_reset_all_cooldown")],
+        [InlineKeyboardButton("🚫 Block User", callback_data="admin_block_user"),
+         InlineKeyboardButton("✅ Unblock User", callback_data="admin_unblock_user")],
         [InlineKeyboardButton("📣 Send Announcement", callback_data="admin_announcement")],
         [InlineKeyboardButton("🚪 Users Who Left", callback_data="admin_left_users"),
          InlineKeyboardButton("❌ Delete All Keys", callback_data="admin_delete_all_keys")]
@@ -832,19 +834,13 @@ def admin_block_user_callback(update: Update, context: CallbackContext) -> None:
         return
     
     instructions = """
-🚫 Block/Mute User
+🚫 Block User
 
 Send in format:
 user_id | reason
 
 Example:
 123456789 | Violated terms of service
-
-To unblock, send:
-unblock user_id
-
-Example:
-unblock 123456789
 """
     
     set_user_state(ADMIN_ID, 'awaiting_block')
@@ -870,6 +866,60 @@ This will allow the user to claim a key immediately.
 """
     
     set_user_state(ADMIN_ID, 'awaiting_cooldown_reset')
+    query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
+
+def admin_reset_all_cooldown_callback(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    
+    if query.from_user.id != ADMIN_ID:
+        query.answer("Access denied", show_alert=True)
+        return
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Confirm Reset All", callback_data="confirm_reset_all_cooldown"),
+            InlineKeyboardButton("❌ Cancel", callback_data="admin_back_main")
+        ]
+    ]
+    query.edit_message_text(
+        "⚠️ Are you sure you want to reset cooldown for ALL users?\n\nAll users will be able to claim keys immediately!",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+def confirm_reset_all_cooldown_callback(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    
+    if query.from_user.id != ADMIN_ID:
+        query.answer("Access denied", show_alert=True)
+        return
+    
+    db.execute_query("UPDATE users SET last_key_time = NULL")
+    users_count = db.fetch_one("SELECT COUNT(*) FROM users")[0]
+    query.edit_message_text(
+        f"✅ Cooldown reset for all users!\n\n📊 Total users affected: {users_count}\n\nAll users can now claim keys immediately.",
+        reply_markup=get_back_admin_keyboard()
+    )
+
+def admin_unblock_user_callback(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    
+    if query.from_user.id != ADMIN_ID:
+        query.answer("Access denied", show_alert=True)
+        return
+    
+    instructions = """
+✅ Unblock User
+
+Send the user ID to unblock:
+
+Example:
+123456789
+"""
+    
+    set_user_state(ADMIN_ID, 'awaiting_unblock')
     query.edit_message_text(instructions, reply_markup=get_back_admin_keyboard())
 
 def admin_announcement_callback(update: Update, context: CallbackContext) -> None:
@@ -1092,26 +1142,43 @@ def process_admin_text(update: Update, context: CallbackContext) -> None:
     
     elif state['state'] == 'awaiting_block':
         try:
-            if text.lower().startswith('unblock'):
-                user_id_str = text.split()[1]
-                user_id_to_unblock = int(user_id_str)
-                db.execute_query("UPDATE users SET blocked = FALSE, block_reason = '' WHERE user_id = ?", (user_id_to_unblock,))
-                clear_user_state(ADMIN_ID)
-                update.message.reply_text(f"✅ User {user_id_to_unblock} unblocked!", reply_markup=get_back_admin_keyboard())
-            elif '|' in text:
+            if '|' in text:
                 parts = text.split('|')
                 user_id_str = parts[0].strip()
                 user_id_to_block = int(user_id_str)
                 reason = parts[1].strip() if len(parts) > 1 else "Blocked by admin"
-                db.execute_query("UPDATE users SET blocked = TRUE, block_reason = ? WHERE user_id = ?", (reason, user_id_to_block))
-                clear_user_state(ADMIN_ID)
-                update.message.reply_text(f"✅ User {user_id_to_block} blocked!", reply_markup=get_back_admin_keyboard())
+                
+                user = get_user_data(user_id_to_block)
+                if user:
+                    db.execute_query("UPDATE users SET blocked = TRUE, block_reason = ? WHERE user_id = ?", (reason, user_id_to_block))
+                    clear_user_state(ADMIN_ID)
+                    update.message.reply_text(f"✅ User {user_id_to_block} blocked!\n\nReason: {reason}", reply_markup=get_back_admin_keyboard())
+                else:
+                    update.message.reply_text(f"❌ User {user_id_to_block} not found in database!", reply_markup=get_back_admin_keyboard())
             else:
-                update.message.reply_text("❌ Invalid format. Use: user_id | reason", reply_markup=get_back_admin_keyboard())
+                update.message.reply_text("❌ Invalid format. Use: user_id | reason\n\nExample: 123456789 | Spam", reply_markup=get_back_admin_keyboard())
         except ValueError:
-            update.message.reply_text("❌ Invalid user ID! Please use numeric user ID only (not username).\n\nExample: 123456789 | reason", reply_markup=get_back_admin_keyboard())
+            update.message.reply_text("❌ Invalid user ID! Please use numeric user ID only.\n\nExample: 123456789 | reason", reply_markup=get_back_admin_keyboard())
         except IndexError:
-            update.message.reply_text("❌ Invalid format. Use: user_id | reason\nor: unblock user_id", reply_markup=get_back_admin_keyboard())
+            update.message.reply_text("❌ Invalid format. Use: user_id | reason", reply_markup=get_back_admin_keyboard())
+        return
+    
+    elif state['state'] == 'awaiting_unblock':
+        if text.isdigit():
+            user_id_to_unblock = int(text)
+            user = get_user_data(user_id_to_unblock)
+            if user:
+                if user['blocked']:
+                    db.execute_query("UPDATE users SET blocked = FALSE, block_reason = '' WHERE user_id = ?", (user_id_to_unblock,))
+                    clear_user_state(ADMIN_ID)
+                    update.message.reply_text(f"✅ User {user_id_to_unblock} unblocked successfully!", reply_markup=get_back_admin_keyboard())
+                else:
+                    clear_user_state(ADMIN_ID)
+                    update.message.reply_text(f"ℹ️ User {user_id_to_unblock} is not blocked.", reply_markup=get_back_admin_keyboard())
+            else:
+                update.message.reply_text(f"❌ User {user_id_to_unblock} not found in database!", reply_markup=get_back_admin_keyboard())
+        else:
+            update.message.reply_text("❌ Invalid user ID! Please send numeric user ID only.\n\nExample: 123456789", reply_markup=get_back_admin_keyboard())
         return
     
     elif state['state'] == 'awaiting_cooldown_reset':
@@ -1192,7 +1259,10 @@ def main():
     dp.add_handler(CallbackQueryHandler(admin_set_cooldown_callback, pattern="^admin_set_cooldown$"))
     dp.add_handler(CallbackQueryHandler(admin_set_key_msg_callback, pattern="^admin_set_key_msg$"))
     dp.add_handler(CallbackQueryHandler(admin_reset_cooldown_callback, pattern="^admin_reset_cooldown$"))
+    dp.add_handler(CallbackQueryHandler(admin_reset_all_cooldown_callback, pattern="^admin_reset_all_cooldown$"))
+    dp.add_handler(CallbackQueryHandler(confirm_reset_all_cooldown_callback, pattern="^confirm_reset_all_cooldown$"))
     dp.add_handler(CallbackQueryHandler(admin_block_user_callback, pattern="^admin_block_user$"))
+    dp.add_handler(CallbackQueryHandler(admin_unblock_user_callback, pattern="^admin_unblock_user$"))
     dp.add_handler(CallbackQueryHandler(admin_announcement_callback, pattern="^admin_announcement$"))
     dp.add_handler(CallbackQueryHandler(announce_text_callback, pattern="^announce_text$"))
     dp.add_handler(CallbackQueryHandler(announce_photo_callback, pattern="^announce_photo$"))
