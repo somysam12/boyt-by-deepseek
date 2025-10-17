@@ -49,11 +49,11 @@ The bot uses SQLite with the following tables:
 - 🤖 Auto-assign keys to waitlist users when adding new keys
 - 📢 Channel management (add/remove with inline buttons)
 - ⏰ Cooldown configuration (1-720 hours)
-- 🔄 Cooldown reset - instantly reset any user's cooldown
+- 🔄 Cooldown reset - instantly reset any user's cooldown OR reset all users at once
 - 💬 Custom key message templates
 - 👥 View all users with IDs and stats
 - 🚪 Track users who left after claiming keys
-- 🚫 Block/Mute users with custom reason messages
+- 🚫 Block/Unblock users - separate buttons with custom reason messages
 - 📣 Send announcements (text only or with photo)
 - 🗑 Key management (delete all keys)
 
@@ -94,11 +94,13 @@ The bot uses SQLite with the following tables:
 3. **Waitlist** - View all users waiting for keys
 4. **Manage Channels** - Add/remove verification channels
 5. **Set Cooldown** - Configure cooldown period (1-720 hours)
-6. **Reset Cooldown** - Enter user ID to instantly reset their cooldown
-7. **Block Users** - Format: `user_id | reason` or `unblock user_id`
-8. **Send Announcements** - Text only or with photo to all users
-9. **Track Users** - View all users, users who left after claiming
-10. **Key Management** - View stats, delete all keys
+6. **Reset Cooldown (User)** - Enter user ID to instantly reset specific user's cooldown
+7. **Reset All Cooldown** - Reset cooldown for ALL users at once (with confirmation)
+8. **Block User** - Format: `user_id | reason` (e.g., `123456789 | Spam`)
+9. **Unblock User** - Enter user ID to unblock (separate button for clarity)
+10. **Send Announcements** - Text only or with photo to all users
+11. **Track Users** - View all users, users who left after claiming
+12. **Key Management** - View stats, delete all keys
 
 ## Development Setup
 The bot automatically initializes the database on first run. The Flask server provides health check endpoints at:
@@ -106,7 +108,19 @@ The bot automatically initializes the database on first run. The Flask server pr
 - `/health` - Returns "OK"
 
 ## Recent Changes
-- **2025-10-17 (Latest Update)**: Enhanced cooldown features
+- **2025-10-17 (Latest Update)**: Admin panel improvements
+  - **Reset All Cooldown Feature:**
+    - Added "🔄 Reset All Cooldown" button to reset cooldown for all users at once
+    - Includes confirmation dialog to prevent accidental resets
+    - Shows count of affected users after reset
+  - **Separate Block/Unblock Buttons:**
+    - Split block and unblock into dedicated buttons for better UX
+    - "🚫 Block User" - block users with custom reason
+    - "✅ Unblock User" - unblock users with separate workflow
+    - Improved error handling and validation for both operations
+    - Better user feedback messages
+
+- **2025-10-17**: Enhanced cooldown features
   - **Cooldown Message Improvements:**
     - Enhanced cooldown display with detailed countdown message
     - Shows "Please wait for the cooldown to finish!" with exact time remaining
