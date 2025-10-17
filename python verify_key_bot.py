@@ -20,7 +20,7 @@ load_dotenv()
 # Configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
-PORT = int(os.getenv('PORT', 8080))
+PORT = int(os.getenv('PORT', 10000))  # Render uses port 10000
 DATABASE_PATH = 'bot_database.db'
 
 # Initialize bot and dispatcher
@@ -180,6 +180,10 @@ async def get_verification_channels() -> List[str]:
 async def check_channel_membership(user_id: int, channel_username: str) -> bool:
     """Check if user is member of a channel"""
     try:
+        # Remove @ if present
+        if channel_username.startswith('@'):
+            channel_username = channel_username[1:]
+            
         chat_member = await bot.get_chat_member(f"@{channel_username}", user_id)
         return chat_member.status in ['member', 'administrator', 'creator']
     except Exception as e:
@@ -516,7 +520,7 @@ async def process_admin_text(message: types.Message):
     text = message.text.strip()
     
     # Check if it's key addition
-    if '|' in text:
+    if '|' in text and not text.startswith('/'):
         keys_added = 0
         keys_duplicate = 0
         
@@ -530,7 +534,7 @@ async def process_admin_text(message: types.Message):
                 continue
                 
             key_text = parts[0]
-            duration_days = int(parts[1]) if len(parts) > 1 else 30
+            duration_days = int(parts[1]) if len(parts) > 1 and parts[1].strip().isdigit() else 30
             meta_name = parts[2] if len(parts) > 2 else "Premium"
             meta_link = parts[3] if len(parts) > 3 else ""
             
@@ -548,6 +552,42 @@ async def process_admin_text(message: types.Message):
             result_text += f"\n❌ {keys_duplicate} duplicate keys skipped"
         
         await message.answer(result_text, reply_markup=get_back_admin_keyboard())
+        return
+    
+    # Process channel addition/removal
+    channels = await get_verification_channels()
+    if text and not text.startswith('/') and '|' not in text:
+        # Remove @ if present
+        if text.startswith('@'):
+            channel_username = text[1:]
+        else:
+            channel_username = text
+            
+        # Check if channel exists
+        if channel_username in channels:
+            # Remove channel
+            await db.execute_query("DELETE FROM channels WHERE username = ?", (channel_username,))
+            await message.answer(f"✅ Channel @{channel_username} removed successfully!", reply_markup=get_back_admin_keyboard())
+        else:
+            # Add channel
+            try:
+                await db.execute_query("INSERT INTO channels (username) VALUES (?)", (channel_username,))
+                await message.answer(f"✅ Channel @{channel_username} added successfully!", reply_markup=get_back_admin_keyboard())
+            except sqlite3.IntegrityError:
+                await message.answer(f"❌ Channel @{channel_username} already exists!", reply_markup=get_back_admin_keyboard())
+        return
+    
+    # Process cooldown setting
+    if text.isdigit() and 1 <= int(text) <= 720:  # Reasonable cooldown range
+        await db.execute_query("UPDATE settings SET value = ? WHERE key = 'cooldown_hours'", (text,))
+        await message.answer(f"✅ Cooldown set to {text} hours!", reply_markup=get_back_admin_keyboard())
+        return
+    
+    # Process key message setting
+    if text and '{key}' in text and not text.startswith('/') and '|' not in text:
+        await db.execute_query("UPDATE settings SET value = ? WHERE key = 'key_message'", (text,))
+        await message.answer("✅ Key message updated successfully!", reply_markup=get_back_admin_keyboard())
+        return
 
 @dp.callback_query(F.data == "admin_add_channel")
 async def admin_add_channel(callback: CallbackQuery):
@@ -721,69 +761,45 @@ async def admin_user_history(callback: CallbackQuery):
     
     await callback.message.edit_text(history_text, reply_markup=get_back_admin_keyboard())
 
-# Process channel addition/removal from admin messages
-@dp.message(F.text & F.from_user.id == ADMIN_ID)
-async def process_channel_management(message: types.Message):
-    """Process channel addition/removal from admin"""
-    text = message.text.strip()
-    
-    # Check if we're in add channel context (simple heuristic)
-    if text and not text.startswith('/') and '|' not in text:
-        # Try to add as channel
-        if not text.startswith('@'):
-            channel_username = text
-        else:
-            channel_username = text[1:]
-        
-        try:
-            await db.execute_query("INSERT INTO channels (username) VALUES (?)", (channel_username,))
-            await message.answer(f"✅ Channel @{channel_username} added successfully!", reply_markup=get_back_admin_keyboard())
-        except sqlite3.IntegrityError:
-            await message.answer(f"❌ Channel @{channel_username} already exists!", reply_markup=get_back_admin_keyboard())
-        
-        # Try to remove channel
-        channels = await get_verification_channels()
-        if channel_username in channels:
-            await db.execute_query("DELETE FROM channels WHERE username = ?", (channel_username,))
-            await message.answer(f"✅ Channel @{channel_username} removed successfully!", reply_markup=get_back_admin_keyboard())
-        else:
-            await message.answer(f"❌ Channel @{channel_username} not found!", reply_markup=get_back_admin_keyboard())
-    
-    # Process cooldown setting
-    if text.isdigit() and 1 <= int(text) <= 720:  # Reasonable cooldown range
-        await db.execute_query("UPDATE settings SET value = ? WHERE key = 'cooldown_hours'", (text,))
-        await message.answer(f"✅ Cooldown set to {text} hours!", reply_markup=get_back_admin_keyboard())
-    
-    # Process key message setting
-    if text and '{key}' in text and not text.startswith('/') and '|' not in text:
-        await db.execute_query("UPDATE settings SET value = ? WHERE key = 'key_message'", (text,))
-        await message.answer("✅ Key message updated successfully!", reply_markup=get_back_admin_keyboard())
+# Web server for Render.com compatibility
+async def handle_health_check(request):
+    """Health check endpoint for Render"""
+    return web.Response(text="Bot is running!")
 
-# Web server for keeping bot alive
-async def web_server():
-    """Simple web server to keep bot alive"""
+async def start_web_server():
+    """Start web server for Render compatibility"""
     app = web.Application()
+    app.router.add_get('/', handle_health_check)
+    app.router.add_get('/health', handle_health_check)
     
-    async def handle(request):
-        return web.Response(text="Bot is running!")
-    
-    app.router.add_get('/', handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    
+    # Use port from environment variable or default to 10000 (Render's preferred port)
+    port = int(os.getenv('PORT', 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    
     await site.start()
-    logger.info(f"Web server started on port {PORT}")
+    logger.info(f"Web server started on port {port}")
+    return runner
 
-# Main function
 async def main():
-    """Main function"""
-    logger.info("Starting bot...")
+    """Main function with Render compatibility"""
+    logger.info("Starting bot on Render.com...")
     
-    # Start web server
-    await web_server()
+    # Start web server first (required for Render)
+    web_runner = await start_web_server()
     
-    # Start bot
-    await dp.start_polling(bot)
+    try:
+        # Start bot polling
+        logger.info("Starting bot polling...")
+        await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+    finally:
+        # Cleanup
+        await web_runner.cleanup()
 
 if __name__ == "__main__":
+    # Run the bot
     asyncio.run(main())
