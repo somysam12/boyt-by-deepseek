@@ -27,6 +27,7 @@ The bot uses SQLite with the following tables:
 - **keys**: Available and used keys
 - **sales**: Key assignment history
 - **settings**: Bot configuration (cooldown, messages)
+- **waitlist**: Users waiting for keys when unavailable
 
 ## Features
 
@@ -36,10 +37,15 @@ The bot uses SQLite with the following tables:
 - 🔑 Automatic key assignment (FIFO)
 - ⏰ Live cooldown countdown (shows remaining time when trying to claim)
 - 🚫 Blocked user handling with custom messages
+- ⏳ Waitlist system - automatically added to queue when keys unavailable
+- 📬 Auto-receive keys when admin adds new ones
 
 ### Admin Features
 - 📊 Bot statistics and analytics
 - 🔑 Flexible key addition (2 formats with hours/days duration)
+- ⏳ Waitlist management - view all users waiting for keys
+- 🔔 Automatic notifications when users join waitlist
+- 🤖 Auto-assign keys to waitlist users when adding new keys
 - 📢 Channel management (add/remove with inline buttons)
 - ⏰ Cooldown configuration (1-720 hours)
 - 💬 Custom key message templates
@@ -69,6 +75,8 @@ The bot uses SQLite with the following tables:
 3. Click "✅ Verify Membership" button
 4. Click "🎁 Claim Key" to get your key
 5. If cooldown is active, you'll see remaining time in hours:minutes format
+6. If no keys available, you'll be automatically added to waitlist
+7. Receive your key automatically when admin adds new keys
 
 ### For Admins
 1. Use `/admin` command to access admin panel
@@ -76,12 +84,14 @@ The bot uses SQLite with the following tables:
    - Format 1: `key | duration | app_name` (e.g., `ABC123 | 7d | Premium`)
    - Format 2: `key | app_name | duration | link` (e.g., `XYZ789 | Pro | 24h | https://example.com`)
    - Duration: Use `24h`, `12hours` for hours OR `7d`, `30days` for days
-3. **Manage Channels** - Add/remove verification channels
-4. **Set Cooldown** - Configure cooldown period (1-720 hours)
-5. **Block Users** - Format: `user_id | reason` or `unblock user_id`
-6. **Send Announcements** - Text only or with photo to all users
-7. **Track Users** - View all users, users who left after claiming
-8. **Key Management** - View stats, delete all keys
+   - Keys automatically distributed to waitlist users
+3. **Waitlist** - View all users waiting for keys
+4. **Manage Channels** - Add/remove verification channels
+5. **Set Cooldown** - Configure cooldown period (1-720 hours)
+6. **Block Users** - Format: `user_id | reason` or `unblock user_id`
+7. **Send Announcements** - Text only or with photo to all users
+8. **Track Users** - View all users, users who left after claiming
+9. **Key Management** - View stats, delete all keys
 
 ## Development Setup
 The bot automatically initializes the database on first run. The Flask server provides health check endpoints at:
@@ -89,6 +99,26 @@ The bot automatically initializes the database on first run. The Flask server pr
 - `/health` - Returns "OK"
 
 ## Recent Changes
+- **2025-10-17 (Latest)**: Critical bug fixes and waitlist system
+  - **Security Fixes:**
+    - Fixed ADMIN_ID security vulnerability (removed default value of 0)
+    - Added strict environment variable validation for BOT_TOKEN and ADMIN_ID
+    - Added blocked user check in waitlist auto-assignment
+  - **Waitlist System Implementation:**
+    - Created waitlist database table
+    - Users automatically added to waitlist when no keys available
+    - Admin receives notification only when new users join waitlist
+    - Auto-assign keys to waitlist users when admin adds new keys
+    - Waitlist respects verification status, cooldown, and block status
+    - Admin panel button to view waitlist
+  - **Bug Fixes:**
+    - Fixed claim process to properly check verification before cooldown
+    - Prevented duplicate admin notifications for already-waitlisted users
+    - Fixed blocked users receiving keys through waitlist auto-assignment
+  - **UX Improvements:**
+    - Different messages for newly waitlisted vs already-waitlisted users
+    - Clear feedback when keys are auto-assigned from waitlist
+
 - **2025-10-17**: Major feature update and Replit setup
   - Installed Python 3.11 and dependencies
   - Configured secrets (BOT_TOKEN, ADMIN_ID)
@@ -108,9 +138,12 @@ The bot automatically initializes the database on first run. The Flask server pr
     - Added `left_channel` tracking to sales table
     - Added `duration_unit` support (hours/days) to keys table
     - Added `channel_link` field to channels table
+    - Added `waitlist` table for queueing users
 
 ## Notes
 - The bot runs continuously with Flask providing a health check endpoint
 - Database is stored in `/tmp/` and will be cleared on Replit restart
-- Keys are distributed FIFO (first in, first out)
+- Keys are distributed FIFO (first in, first out) to waitlist users
 - Admin access is restricted to the configured ADMIN_ID
+- Waitlist users automatically receive keys when admin adds them
+- Blocked users are removed from waitlist and cannot receive keys
