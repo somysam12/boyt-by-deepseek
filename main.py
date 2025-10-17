@@ -569,12 +569,16 @@ def claim_callback(update: Update, context: CallbackContext) -> None:
             hours = seconds_left // 3600
             minutes = (seconds_left % 3600) // 60
             
-            cooldown_msg = f"⏰ Please wait for the cooldown to finish!\n\n"
+            cooldown_msg = f"⏰ Cooldown Active!\n\n"
             cooldown_msg += f"🕐 Time Remaining: {hours} hours {minutes} minutes\n\n"
             cooldown_msg += f"⏳ You can claim your next key at:\n"
-            cooldown_msg += f"📅 {next_claim.strftime('%Y-%m-%d %H:%M')}"
+            cooldown_msg += f"📅 {next_claim.strftime('%Y-%m-%d %H:%M')}\n\n"
+            cooldown_msg += f"Please wait for the cooldown to finish!"
             
-            query.answer(cooldown_msg, show_alert=True)
+            try:
+                query.edit_message_text(cooldown_msg, reply_markup=get_main_keyboard(context.bot, user_id))
+            except:
+                query.answer(cooldown_msg, show_alert=True)
             return
     
     # Check for available keys
