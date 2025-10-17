@@ -1091,20 +1091,27 @@ def process_admin_text(update: Update, context: CallbackContext) -> None:
         return
     
     elif state['state'] == 'awaiting_block':
-        if text.lower().startswith('unblock'):
-            user_id_to_unblock = int(text.split()[1])
-            db.execute_query("UPDATE users SET blocked = FALSE, block_reason = '' WHERE user_id = ?", (user_id_to_unblock,))
-            clear_user_state(ADMIN_ID)
-            update.message.reply_text(f"✅ User {user_id_to_unblock} unblocked!", reply_markup=get_back_admin_keyboard())
-        elif '|' in text:
-            parts = text.split('|')
-            user_id_to_block = int(parts[0].strip())
-            reason = parts[1].strip() if len(parts) > 1 else "Blocked by admin"
-            db.execute_query("UPDATE users SET blocked = TRUE, block_reason = ? WHERE user_id = ?", (reason, user_id_to_block))
-            clear_user_state(ADMIN_ID)
-            update.message.reply_text(f"✅ User {user_id_to_block} blocked!", reply_markup=get_back_admin_keyboard())
-        else:
-            update.message.reply_text("❌ Invalid format. Use: user_id | reason", reply_markup=get_back_admin_keyboard())
+        try:
+            if text.lower().startswith('unblock'):
+                user_id_str = text.split()[1]
+                user_id_to_unblock = int(user_id_str)
+                db.execute_query("UPDATE users SET blocked = FALSE, block_reason = '' WHERE user_id = ?", (user_id_to_unblock,))
+                clear_user_state(ADMIN_ID)
+                update.message.reply_text(f"✅ User {user_id_to_unblock} unblocked!", reply_markup=get_back_admin_keyboard())
+            elif '|' in text:
+                parts = text.split('|')
+                user_id_str = parts[0].strip()
+                user_id_to_block = int(user_id_str)
+                reason = parts[1].strip() if len(parts) > 1 else "Blocked by admin"
+                db.execute_query("UPDATE users SET blocked = TRUE, block_reason = ? WHERE user_id = ?", (reason, user_id_to_block))
+                clear_user_state(ADMIN_ID)
+                update.message.reply_text(f"✅ User {user_id_to_block} blocked!", reply_markup=get_back_admin_keyboard())
+            else:
+                update.message.reply_text("❌ Invalid format. Use: user_id | reason", reply_markup=get_back_admin_keyboard())
+        except ValueError:
+            update.message.reply_text("❌ Invalid user ID! Please use numeric user ID only (not username).\n\nExample: 123456789 | reason", reply_markup=get_back_admin_keyboard())
+        except IndexError:
+            update.message.reply_text("❌ Invalid format. Use: user_id | reason\nor: unblock user_id", reply_markup=get_back_admin_keyboard())
         return
     
     elif state['state'] == 'awaiting_cooldown_reset':

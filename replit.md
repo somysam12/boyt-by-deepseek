@@ -35,7 +35,8 @@ The bot uses SQLite with the following tables:
 - ✅ Channel membership verification with inline join buttons
 - 🎁 Key claiming system with cooldown
 - 🔑 Automatic key assignment (FIFO)
-- ⏰ Live cooldown countdown (shows remaining time when trying to claim)
+- ⏰ Enhanced cooldown display - shows detailed countdown with exact unlock date/time
+- 🔄 Second claim support - claim new keys after cooldown expires
 - 🚫 Blocked user handling with custom messages
 - ⏳ Waitlist system - automatically added to queue when keys unavailable
 - 📬 Auto-receive keys when admin adds new ones
@@ -48,6 +49,7 @@ The bot uses SQLite with the following tables:
 - 🤖 Auto-assign keys to waitlist users when adding new keys
 - 📢 Channel management (add/remove with inline buttons)
 - ⏰ Cooldown configuration (1-720 hours)
+- 🔄 Cooldown reset - instantly reset any user's cooldown
 - 💬 Custom key message templates
 - 👥 View all users with IDs and stats
 - 🚪 Track users who left after claiming keys
@@ -74,9 +76,13 @@ The bot uses SQLite with the following tables:
 2. Click inline buttons to join all required channels
 3. Click "✅ Verify Membership" button
 4. Click "🎁 Claim Key" to get your key
-5. If cooldown is active, you'll see remaining time in hours:minutes format
-6. If no keys available, you'll be automatically added to waitlist
-7. Receive your key automatically when admin adds new keys
+5. If cooldown is active, you'll see:
+   - Detailed message: "Please wait for the cooldown to finish!"
+   - Time remaining in hours and minutes
+   - Exact date/time when you can claim next key
+6. After cooldown expires, you can claim another key
+7. If no keys available, you'll be automatically added to waitlist
+8. Receive your key automatically when admin adds new keys
 
 ### For Admins
 1. Use `/admin` command to access admin panel
@@ -88,10 +94,11 @@ The bot uses SQLite with the following tables:
 3. **Waitlist** - View all users waiting for keys
 4. **Manage Channels** - Add/remove verification channels
 5. **Set Cooldown** - Configure cooldown period (1-720 hours)
-6. **Block Users** - Format: `user_id | reason` or `unblock user_id`
-7. **Send Announcements** - Text only or with photo to all users
-8. **Track Users** - View all users, users who left after claiming
-9. **Key Management** - View stats, delete all keys
+6. **Reset Cooldown** - Enter user ID to instantly reset their cooldown
+7. **Block Users** - Format: `user_id | reason` or `unblock user_id`
+8. **Send Announcements** - Text only or with photo to all users
+9. **Track Users** - View all users, users who left after claiming
+10. **Key Management** - View stats, delete all keys
 
 ## Development Setup
 The bot automatically initializes the database on first run. The Flask server provides health check endpoints at:
@@ -99,7 +106,21 @@ The bot automatically initializes the database on first run. The Flask server pr
 - `/health` - Returns "OK"
 
 ## Recent Changes
-- **2025-10-17 (Latest)**: Critical bug fixes and waitlist system
+- **2025-10-17 (Latest Update)**: Enhanced cooldown features
+  - **Cooldown Message Improvements:**
+    - Enhanced cooldown display with detailed countdown message
+    - Shows "Please wait for the cooldown to finish!" with exact time remaining
+    - Displays unlock date/time when user can claim next key (format: YYYY-MM-DD HH:MM)
+  - **Admin Cooldown Reset Feature:**
+    - Added "🔄 Reset Cooldown" button in admin panel
+    - Admin can instantly reset any user's cooldown by entering user ID
+    - Validates user exists before resetting
+    - User can claim key immediately after reset
+  - **Second Claim Verification:**
+    - Confirmed users can claim new keys after cooldown expires
+    - No errors or restrictions on subsequent claims
+
+- **2025-10-17**: Critical bug fixes and waitlist system
   - **Security Fixes:**
     - Fixed ADMIN_ID security vulnerability (removed default value of 0)
     - Added strict environment variable validation for BOT_TOKEN and ADMIN_ID
