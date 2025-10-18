@@ -575,10 +575,8 @@ def claim_callback(update: Update, context: CallbackContext) -> None:
             cooldown_msg += f"📅 {next_claim.strftime('%Y-%m-%d %H:%M')}\n\n"
             cooldown_msg += f"Please wait for the cooldown to finish!"
             
-            try:
-                query.edit_message_text(cooldown_msg, reply_markup=get_main_keyboard(context.bot, user_id))
-            except:
-                query.answer(cooldown_msg, show_alert=True)
+            # Use alert popup instead of editing message to preserve key message
+            query.answer(cooldown_msg, show_alert=True)
             return
     
     # Check for available keys
@@ -603,10 +601,20 @@ def claim_callback(update: Update, context: CallbackContext) -> None:
         link=assigned_key['link']
     )
     
-    query.edit_message_text(
-        key_message + f"\n\n⏰ Expires: {assigned_key['expires_at'].strftime('%Y-%m-%d %H:%M')}",
-        reply_markup=get_main_keyboard(context.bot, user_id)
-    )
+    # Send new message instead of editing to avoid losing previous key
+    try:
+        context.bot.send_message(
+            chat_id=user_id,
+            text=key_message + f"\n\n⏰ Expires: {assigned_key['expires_at'].strftime('%Y-%m-%d %H:%M')}",
+            reply_markup=get_main_keyboard(context.bot, user_id)
+        )
+        query.answer("✅ Key sent!", show_alert=False)
+    except:
+        # Fallback to edit if send fails
+        query.edit_message_text(
+            key_message + f"\n\n⏰ Expires: {assigned_key['expires_at'].strftime('%Y-%m-%d %H:%M')}",
+            reply_markup=get_main_keyboard(context.bot, user_id)
+        )
 
 # Admin handlers
 def admin_command(update: Update, context: CallbackContext) -> None:
@@ -675,21 +683,42 @@ def admin_all_users_callback(update: Update, context: CallbackContext) -> None:
         query.answer("Access denied", show_alert=True)
         return
     
+    # Get page number from callback data
+    page = 1
+    if query.data and "page_" in query.data:
+        page = int(query.data.split("_")[2])
+    
+    per_page = 20
     users = db.fetch_all("SELECT user_id, username, verified, total_keys_claimed, first_seen FROM users ORDER BY first_seen DESC")
     
     if not users:
         query.edit_message_text("No users found.", reply_markup=get_back_admin_keyboard())
         return
     
-    users_text = "👥 All Users:\n\n"
-    for user_id, username, verified, keys_claimed, first_seen in users[:20]:
+    total_users = len(users)
+    total_pages = (total_users + per_page - 1) // per_page
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    
+    users_text = f"👥 All Users (Page {page}/{total_pages}):\n\n"
+    for user_id, username, verified, keys_claimed, first_seen in users[start_idx:end_idx]:
         status = "✅" if verified else "❌"
         users_text += f"{status} ID: {user_id} | @{username or 'N/A'} | Keys: {keys_claimed}\n"
     
-    if len(users) > 20:
-        users_text += f"\n... and {len(users) - 20} more users"
+    users_text += f"\n📊 Total: {total_users} user(s)"
     
-    query.edit_message_text(users_text, reply_markup=get_back_admin_keyboard())
+    # Add pagination buttons
+    keyboard = []
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"admin_all_users_page_{page-1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_all_users_page_{page+1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    keyboard.append([InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back_main")])
+    
+    query.edit_message_text(users_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 def admin_add_keys_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -994,13 +1023,14 @@ def admin_waitlist_callback(update: Update, context: CallbackContext) -> None:
 
 def admin_left_users_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    query.answer()
+    query.answer("Checking users... please wait")
     
     if query.from_user.id != ADMIN_ID:
         query.answer("Access denied", show_alert=True)
         return
     
-    check_users_left_channels(context.bot)
+    # Optimize: Only check active users in background
+    Thread(target=check_users_left_channels, args=(context.bot,), daemon=True).start()
     
     left_users = db.fetch_all('''
         SELECT DISTINCT u.user_id, u.username, s.assigned_at
@@ -1015,11 +1045,13 @@ def admin_left_users_callback(update: Update, context: CallbackContext) -> None:
         return
     
     left_text = "🚪 Users Who Left After Claiming:\n\n"
-    for user_id, username, assigned_at in left_users[:20]:
+    for user_id, username, assigned_at in left_users[:30]:
         left_text += f"• ID: {user_id} | @{username or 'N/A'}\n"
     
-    if len(left_users) > 20:
-        left_text += f"\n... and {len(left_users) - 20} more users"
+    if len(left_users) > 30:
+        left_text += f"\n... and {len(left_users) - 30} more users"
+    
+    left_text += f"\n\n📊 Total: {len(left_users)} user(s) left"
     
     query.edit_message_text(left_text, reply_markup=get_back_admin_keyboard())
 
@@ -1044,14 +1076,24 @@ def admin_delete_all_keys_callback(update: Update, context: CallbackContext) -> 
 
 def confirm_delete_all_keys_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    query.answer()
+    query.answer("Deleting all keys... please wait")
     
     if query.from_user.id != ADMIN_ID:
         query.answer("Access denied", show_alert=True)
         return
     
-    db.execute_query("DELETE FROM keys")
-    query.edit_message_text("✅ All keys deleted successfully!", reply_markup=get_back_admin_keyboard())
+    # Get count before deletion
+    count_result = db.fetch_one("SELECT COUNT(*) FROM keys")
+    total_keys = count_result[0] if count_result else 0
+    
+    # Delete in batches for better performance with large datasets
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM keys")
+    conn.commit()
+    conn.close()
+    
+    query.edit_message_text(f"✅ All {total_keys} keys deleted successfully!", reply_markup=get_back_admin_keyboard())
 
 # Process admin text input
 def process_admin_text(update: Update, context: CallbackContext) -> None:
@@ -1064,8 +1106,13 @@ def process_admin_text(update: Update, context: CallbackContext) -> None:
     if state['state'] == 'awaiting_keys':
         keys_added = 0
         keys_duplicate = 0
+        lines = text.split('\n')
         
-        for line in text.split('\n'):
+        # Support up to 500 keys per batch (increased from ~49)
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        for line in lines[:500]:  # Limit to 500 keys per batch
             line = line.strip()
             if not line:
                 continue
@@ -1088,7 +1135,7 @@ def process_admin_text(update: Update, context: CallbackContext) -> None:
                 continue
             
             try:
-                db.execute_query('''
+                cursor.execute('''
                     INSERT INTO keys (key_text, duration_value, duration_unit, meta_name, meta_link)
                     VALUES (?, ?, ?, ?, ?)
                 ''', (key_text, duration_value, duration_unit, meta_name, meta_link))
@@ -1096,9 +1143,14 @@ def process_admin_text(update: Update, context: CallbackContext) -> None:
             except sqlite3.IntegrityError:
                 keys_duplicate += 1
         
+        conn.commit()
+        conn.close()
+        
         result_text = f"✅ Added {keys_added} keys"
         if keys_duplicate > 0:
             result_text += f"\n❌ {keys_duplicate} duplicate keys skipped"
+        if len(lines) > 500:
+            result_text += f"\n⚠️ {len(lines) - 500} keys not processed (max 500 per batch)"
         
         clear_user_state(ADMIN_ID)
         update.message.reply_text(result_text, reply_markup=get_back_admin_keyboard())
@@ -1255,7 +1307,7 @@ def main():
     
     dp.add_handler(CallbackQueryHandler(admin_back_main_callback, pattern="^admin_back_main$"))
     dp.add_handler(CallbackQueryHandler(admin_stats_callback, pattern="^admin_stats$"))
-    dp.add_handler(CallbackQueryHandler(admin_all_users_callback, pattern="^admin_all_users$"))
+    dp.add_handler(CallbackQueryHandler(admin_all_users_callback, pattern="^admin_all_users"))
     dp.add_handler(CallbackQueryHandler(admin_add_keys_callback, pattern="^admin_add_keys$"))
     dp.add_handler(CallbackQueryHandler(admin_waitlist_callback, pattern="^admin_waitlist$"))
     dp.add_handler(CallbackQueryHandler(admin_add_channel_callback, pattern="^admin_add_channel$"))

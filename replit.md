@@ -108,7 +108,32 @@ The bot automatically initializes the database on first run. The Flask server pr
 - `/health` - Returns "OK"
 
 ## Recent Changes
-- **2025-10-17 (Latest Update)**: Render deployment support added
+- **2025-10-18 (Latest Update)**: Major bug fixes and performance improvements
+  - **Key Addition Limit Increased:**
+    - Increased from ~49 keys to 500 keys per batch
+    - Added direct database connection for better performance
+    - Shows warning if more than 500 keys submitted
+  - **Delete All Keys Optimized:**
+    - Now shows total count of deleted keys
+    - Direct database connection for better performance with large datasets
+    - Added loading message for user feedback
+  - **Users Who Left Optimized:**
+    - Moved membership check to background thread for instant response
+    - Increased display limit from 20 to 30 users
+    - Shows total count of users who left
+    - Button now responds immediately
+  - **All Users Pagination:**
+    - Added pagination with Previous/Next buttons
+    - Shows 20 users per page
+    - Displays current page and total pages
+    - Shows total user count
+  - **Claim Button Fix:**
+    - Fixed issue where key message would disappear on second click
+    - Cooldown messages now shown as popup alerts instead of editing message
+    - Previous key messages are preserved
+    - New keys sent as separate messages
+
+- **2025-10-17**: Render deployment support added
   - **Webhook Mode Support:**
     - Bot now supports both polling (Replit) and webhook (Render) modes
     - Automatically detects WEBHOOK_URL environment variable
