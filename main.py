@@ -539,7 +539,6 @@ def verify_callback(update: Update, context: CallbackContext) -> None:
 
 def claim_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    query.answer()
     
     user_id = query.from_user.id
     username = query.from_user.username
@@ -575,7 +574,7 @@ def claim_callback(update: Update, context: CallbackContext) -> None:
             cooldown_msg += f"📅 {next_claim.strftime('%Y-%m-%d %H:%M')}\n\n"
             cooldown_msg += f"Please wait for the cooldown to finish!"
             
-            # Use alert popup instead of editing message to preserve key message
+            # Show popup alert to preserve key message (don't edit message)
             query.answer(cooldown_msg, show_alert=True)
             return
     
