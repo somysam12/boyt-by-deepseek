@@ -24,7 +24,7 @@ public class VNative {
     public static String libtarget = "libbgmi.so";
 
     static {
-        System.loadLibrary("EliteCore");
+        System.loadLibrary("CreepSimp");
         File file = new File(MundoCore.getContext().getFilesDir(), "loader/" + libtarget);
         if (file.exists()) {
             System.load(file.getAbsolutePath());

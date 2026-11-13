@@ -10,7 +10,7 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 # --- Module Name ---
-LOCAL_MODULE := EliteCore
+LOCAL_MODULE := CreepSimp
 
 # -------- C FLAGS (SAFE) --------
 LOCAL_CFLAGS := \
@@ -54,19 +54,19 @@ LOCAL_C_INCLUDES += $(LOCAL_PATH)/SandHook/libzip
 LOCAL_C_INCLUDES += $(LOCAL_PATH)/libzip
 
 # --- Source Files (AS-IS) ---
-ELITE_SRC := $(wildcard $(LOCAL_PATH)/*.cpp)
-ELITE_SRC += $(wildcard $(LOCAL_PATH)/Hook/*.cpp)
-ELITE_SRC += $(wildcard $(LOCAL_PATH)/IO/*.cpp)
-ELITE_SRC += $(wildcard $(LOCAL_PATH)/JniHook/*.cpp)
-ELITE_SRC += $(wildcard $(LOCAL_PATH)/SandHook/*.cpp)
+CREEP_SRC := $(wildcard $(LOCAL_PATH)/*.cpp)
+CREEP_SRC += $(wildcard $(LOCAL_PATH)/Hook/*.cpp)
+CREEP_SRC += $(wildcard $(LOCAL_PATH)/IO/*.cpp)
+CREEP_SRC += $(wildcard $(LOCAL_PATH)/JniHook/*.cpp)
+CREEP_SRC += $(wildcard $(LOCAL_PATH)/SandHook/*.cpp)
 
 # C Files (xdl - SandHook/xdl mein)
-ELITE_SRC += $(wildcard $(LOCAL_PATH)/SandHook/xdl/*.c)
+CREEP_SRC += $(wildcard $(LOCAL_PATH)/SandHook/xdl/*.c)
 # C Files (libzip - SandHook/libzip mein) - CORRECTED
-ELITE_SRC += $(wildcard $(LOCAL_PATH)/SandHook/libzip/*.c)
+CREEP_SRC += $(wildcard $(LOCAL_PATH)/SandHook/libzip/*.c)
 
 
-LOCAL_SRC_FILES := $(ELITE_SRC:$(LOCAL_PATH)/%=%)
+LOCAL_SRC_FILES := $(CREEP_SRC:$(LOCAL_PATH)/%=%)
 
 LOCAL_STATIC_LIBRARIES := libdobby
 

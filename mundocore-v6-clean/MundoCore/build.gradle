@@ -62,6 +62,7 @@ android {
     aaptOptions {
         cruncherEnabled = false
         useNewCruncher = false
+        ignoreAssetsPattern '!licenses:!*.txt:!*.TXT:!NOTICE:!LICENSE:!*.md'
     }
 
     buildFeatures {
