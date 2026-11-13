@@ -12,10 +12,10 @@ include $(CLEAR_VARS)
 # --- Module Name ---
 LOCAL_MODULE := CreepSimp
 
-# OLLVM two-step obfuscation pipeline:
-# cc_obf.sh / cxx_obf.sh: NDK clang → O1 bitcode → opt-14 obfuscation → native object
-LOCAL_CC  := $(LOCAL_PATH)/cc_obf.sh
-LOCAL_CXX := $(LOCAL_PATH)/cxx_obf.sh
+# OLLVM obfuscation is applied via NDK_CCACHE=obf_ccache.sh (set in build.gradle
+# externalNativeBuild arguments). The wrapper intercepts each compile and runs:
+# NDK clang -> O1 bitcode -> opt-14 OLLVM passes -> llc-14 native object.
+# -O1 (not -O2) is required: O0 marks functions optnone which skips the passes.
 
 # -------- C FLAGS (SAFE) --------
 LOCAL_CFLAGS := \
