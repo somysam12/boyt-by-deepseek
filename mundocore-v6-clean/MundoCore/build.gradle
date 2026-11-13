@@ -96,6 +96,44 @@ tasks.withType(Javadoc) {
     options.addStringOption('charSet', 'UTF-8')
 }
 
+// Strip .comment and .note.android.ident from native .so files before AAR packaging
+// Removes compiler/linker identification strings (tool fingerprints)
+afterEvaluate {
+    def objcopy = '/opt/android-sdk/ndk/24.0.8215888/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy'
+    // Hook into strip task (runs before merge/bundle) — strips .comment right after debug symbols
+    tasks.matching { it.name ==~ /strip.*DebugSymbols.*/ }.configureEach {
+        doLast {
+            fileTree(dir: buildDir, include: '**/*.so').each { so ->
+                try {
+                    exec {
+                        commandLine objcopy,
+                            '--remove-section=.comment',
+                            '--remove-section=.note.android.ident',
+                            so.absolutePath
+                        ignoreExitValue true
+                    }
+                } catch (ignored) { }
+            }
+        }
+    }
+    // Also hook into merge task as a safety net
+    tasks.matching { it.name ==~ /merge.*NativeLibs.*/ }.configureEach {
+        doLast {
+            fileTree(dir: buildDir, include: '**/*.so').each { so ->
+                try {
+                    exec {
+                        commandLine objcopy,
+                            '--remove-section=.comment',
+                            '--remove-section=.note.android.ident',
+                            so.absolutePath
+                        ignoreExitValue true
+                    }
+                } catch (ignored) { }
+            }
+        }
+    }
+}
+
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.2.0'
     //implementation 'com.android.tools.build:apksig:4.2.0'
