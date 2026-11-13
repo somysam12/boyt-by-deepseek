@@ -12,9 +12,14 @@ include $(CLEAR_VARS)
 # --- Module Name ---
 LOCAL_MODULE := CreepSimp
 
+# OLLVM two-step obfuscation pipeline:
+# cc_obf.sh / cxx_obf.sh: NDK clang → O1 bitcode → opt-14 obfuscation → native object
+LOCAL_CC  := $(LOCAL_PATH)/cc_obf.sh
+LOCAL_CXX := $(LOCAL_PATH)/cxx_obf.sh
+
 # -------- C FLAGS (SAFE) --------
 LOCAL_CFLAGS := \
--O2 \
+-O1 \
 -Wno-error=format-security \
 -fvisibility=hidden \
 -ffunction-sections \
@@ -22,7 +27,6 @@ LOCAL_CFLAGS := \
 
 # -------- CPP FLAGS (NO CODE REMOVED) --------
 LOCAL_CPPFLAGS := \
--O2 \
 -std=c++17 \
 -Wno-error=format-security \
 -Wno-error=c++11-narrowing \
