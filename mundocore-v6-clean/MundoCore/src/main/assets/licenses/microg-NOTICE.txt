@@ -1,0 +1,21 @@
+MundoCore embedded Google authentication
+
+This AAR contains an adapted authentication subset from microG GmsCore
+(https://github.com/microg/GmsCore), Copyright 2013-2023 microG Project Team,
+licensed under the Apache License, Version 2.0; see microg-Apache-2.0.txt.
+
+Adapted sources and where they live here:
+  AuthRequest.java, AuthResponse.java      -> com.mundo.core.gms.AuthRequest / AuthResponse
+  AuthManager.java                         -> com.mundo.core.gms.AuthManager
+  HttpFormClient.java                      -> com.mundo.core.gms.HttpFormClient
+  HttpFormClient/CheckinClient           -> com.mundo.core.gms.GmsCheckin
+  LoginActivity.java (WebView, JsBridge)   -> com.mundo.proxy.gms.GoogleLoginActivity
+  AuthSignInActivity.kt (result contract)  -> com.mundo.proxy.gms.GoogleLoginActivity
+  ConsentSignInActivity.kt                 -> com.mundo.proxy.gms.ConsentSignInActivity
+  auth/signin/extensions.kt,
+  AuthSignInService.kt                     -> com.mundo.core.gms.GmsAuthService,
+                                              com.mundo.core.gms.FakeSignInService
+
+Changes: AccountManager replaced by an AndroidKeyStore-encrypted store owned by a
+single MundoCore service process; DroidGuard and the People API client removed;
+Binder interfaces implemented by hand instead of AIDL.

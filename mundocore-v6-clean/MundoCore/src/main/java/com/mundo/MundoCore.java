@@ -1,0 +1,521 @@
+package com.mundo;
+
+import android.app.Activity;
+import android.app.Application;
+import android.widget.Toast;
+import android.annotation.SuppressLint;
+import android.app.ActivityManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.MetaCore.RemoteManager;
+import android.graphics.Color;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.os.Process;
+import dalvik.system.DexFile;
+import java.io.IOException;
+import com.mundo.core.bypass.HiddenApiBypassInternal;
+import me.weishu.reflection.Reflection;
+import org.lsposed.hiddenapibypass.HiddenApiBypass;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import black.android.app.BRActivityThread;
+import black.android.os.BRUserHandle;
+import com.mundo.app.LauncherActivity;
+import com.mundo.app.configuration.AppLifecycleCallback;
+import com.mundo.app.configuration.ClientConfiguration;
+import com.mundo.core.GmsCore;
+import com.mundo.core.env.BEnvironment;
+import com.mundo.core.system.DaemonService;
+import com.mundo.core.system.ServiceManager;
+import com.mundo.core.system.user.BUserHandle;
+import com.mundo.core.system.user.BUserInfo;
+import com.mundo.entity.AppConfig;
+import com.mundo.entity.pm.InstallOption;
+import com.mundo.entity.pm.InstallResult;
+import com.mundo.entity.pm.InstalledModule;
+import com.mundo.fake.delegate.ContentProviderDelegate;
+import com.mundo.fake.frameworks.BActivityManager;
+import com.mundo.fake.frameworks.BJobManager;
+import com.mundo.fake.frameworks.BPackageManager;
+import com.mundo.fake.frameworks.BStorageManager;
+import com.mundo.fake.frameworks.BUserManager;
+import com.mundo.fake.frameworks.BXposedManager;
+import com.mundo.fake.hook.HookManager;
+import com.mundo.proxy.ProxyManifest;
+import com.mundo.utils.FileUtils;
+import com.mundo.utils.ShellUtils;
+import com.mundo.utils.Slog;
+import com.mundo.utils.compat.BuildCompat;
+import com.mundo.utils.compat.BundleCompat;
+import com.mundo.utils.compat.XposedParserCompat;
+import com.mundo.utils.provider.ProviderCall;
+import com.mundo.core.system.api.MetaActivationManager;
+import org.lsposed.lsparanoid.Obfuscate;
+/**
+ * Created by @jagdish_vip on 3/30/21.
+ * * ∧＿∧
+ * (`･ω･∥
+ * 丶　つ０
+ * しーＪ
+ * 此处无Bug
+ */
+@Obfuscate
+@SuppressLint({"StaticFieldLeak", "NewApi"})
+public class MundoCore extends ClientConfiguration {
+    public static final String TAG = "MundoCore";
+
+    private static final MundoCore sMundoCore = new MundoCore();
+    private static Context sContext;
+    private ProcessType mProcessType;
+    private final Map<String, IBinder> mServices = new HashMap<>();
+    private Thread.UncaughtExceptionHandler mExceptionHandler;
+    private ClientConfiguration mClientConfiguration;
+    private final List<AppLifecycleCallback> mAppLifecycleCallbacks = new ArrayList<>();
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+    private final int mHostUid = Process.myUid();
+    private final int mHostUserId = BRUserHandle.get().myUserId();
+    private AppConfig appConfig;
+    
+    public static MundoCore get() {
+        return sMundoCore;
+    }
+
+    public Handler getHandler() {
+        return mHandler;
+    }
+
+    public static PackageManager getPackageManager() {
+        return sContext.getPackageManager();
+    }
+
+    public static String getHostPkg() {
+        return get().getHostPackageName();
+    }
+
+    public static int getHostUid() {
+        return get().mHostUid;
+    }
+
+    public static int getHostUserId() {
+        return get().mHostUserId;
+    }
+
+    public static Context getContext() {
+        return sContext;
+    }
+
+    public AppConfig getAppConfig() {
+        return appConfig;
+    }
+
+    public Thread.UncaughtExceptionHandler getExceptionHandler() {
+        return mExceptionHandler;
+    }
+
+    public void setExceptionHandler(Thread.UncaughtExceptionHandler exceptionHandler) {
+        mExceptionHandler = exceptionHandler;
+    }
+    
+    public static void setHideRoot(boolean hideRoot) { 
+        RemoteManager.sHideRoot = hideRoot; 
+    }
+    
+    public static void setHideXposed(boolean hide) {
+        RemoteManager.sHideXposed = hide;
+    }
+    
+    public static void setEnableDaemonService(boolean enableDaemonService) { 
+        RemoteManager.sEnableDaemonService = enableDaemonService; 
+    }
+
+    public void doAttachBaseContext(Context context, ClientConfiguration clientConfiguration) {
+        if (clientConfiguration == null) {
+            throw new IllegalArgumentException("ClientConfiguration is null!");
+        }
+        
+        // Primary bypass: Unsafe-based ART method flag patching (Mundo x5/w4).
+        // Idempotent — safe to call again if already installed from ArkApplication.
+        HiddenApiBypassInternal.install();
+        // Secondary: LSPosed HiddenApiBypass
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            HiddenApiBypass.addHiddenApiExemptions("L");
+        }
+        // Tertiary: FreeReflection
+        Reflection.unseal(context);
+        sContext = context;
+        mClientConfiguration = clientConfiguration;
+        initNotificationManager();
+
+        String processName = getProcessName(getContext());
+        if (processName.equals(MundoCore.getHostPkg())) {
+            mProcessType = ProcessType.Main;
+            startLogcat();
+        } else if (processName.endsWith(getContext().getString(R.string.vbox_service_name))) {
+            mProcessType = ProcessType.Server;
+        } else {
+            mProcessType = ProcessType.BAppClient;
+        }
+        android.util.Log.w("MundoGms", "doAttachBaseContext process=" + processName
+                + " type=" + mProcessType + " isBlack=" + isBlackProcess() + " isServer=" + isServerProcess());
+
+        if (MundoCore.get().isBlackProcess()) {
+            BEnvironment.load();
+        }
+        
+        if (isServerProcess()) {
+            if (RemoteManager.sEnableDaemonService) {
+                Intent intent = new Intent();
+                intent.setClass(getContext(), DaemonService.class);
+                if (BuildCompat.isOreo_MR1()) {
+                    getContext().startForegroundService(intent);
+                } else {
+                    getContext().startService(intent);
+                }
+            }
+        }
+        android.util.Log.w("MundoGms", "About to call HookManager.init()");
+        try {
+            HookManager.get().init();
+            android.util.Log.w("MundoGms", "HookManager.init() completed OK");
+        } catch (Throwable t) {
+            android.util.Log.w("MundoGms", "HookManager.init() CRASHED: " + t);
+        }
+    }
+
+    public void doCreate() {
+        // fix contentProvider
+        if (isBlackProcess()) {
+            ContentProviderDelegate.init();
+        }
+        if (!isServerProcess()) {
+            ServiceManager.initBlackManager();
+        }
+    }
+
+    public static Object mainThread() {
+        return BRActivityThread.get().currentActivityThread();
+    }
+
+    public void startActivity(Intent intent, int userId) {
+        if (intent == null) { return; }
+        if (mClientConfiguration.isEnableLauncherActivity()) {
+            LauncherActivity.launch(intent, userId);
+        } else {
+            getBActivityManager().startActivity(intent, userId);
+        }
+    }
+    
+    public void onBeforeMainLaunchApk(String packageName,int userid) {
+        for (AppLifecycleCallback appLifecycleCallback : MundoCore.get().getAppLifecycleCallbacks()) {
+            appLifecycleCallback.beforeMainLaunchApk(packageName,userid);
+        }
+    }
+
+    public static BJobManager getBJobManager() {
+        return BJobManager.get();
+    }
+
+    public static BPackageManager getBPackageManager() {
+        return BPackageManager.get();
+    }
+
+    public static BActivityManager getBActivityManager() {
+        return BActivityManager.get();
+    }
+
+    public static BStorageManager getBStorageManager() {
+        return BStorageManager.get();
+    }
+
+   public boolean launchApk(String packageName, int userId) {
+		onBeforeMainLaunchApk(packageName, userId);
+		Intent launchIntentForPackage = getBPackageManager().getLaunchIntentForPackage(packageName, userId);
+		if (launchIntentForPackage == null) {
+			return false;
+		}
+		startActivity(launchIntentForPackage, userId);
+		return true;
+	}
+
+
+    public boolean isInstalled(String packageName, int userId) {
+        return getBPackageManager().isInstalled(packageName, userId);
+    }
+
+    public void uninstallPackageAsUser(String packageName, int userId) {
+        getBPackageManager().uninstallPackageAsUser(packageName, userId);
+    }
+
+    public void uninstallPackage(String packageName) {
+        getBPackageManager().uninstallPackage(packageName);
+    }
+
+    public InstallResult installPackageAsUser(String packageName, int userId) {
+		try {
+			PackageInfo packageInfo = getPackageManager().getPackageInfo(packageName, 0);
+			return getBPackageManager().installPackageAsUser(packageInfo.applicationInfo.sourceDir, InstallOption.installBySystem(), userId);
+		} catch (PackageManager.NameNotFoundException e) {
+			e.printStackTrace();
+			return new InstallResult().installError(e.getMessage());
+		}
+	}
+
+    public InstallResult installPackageAsUser(File apk, int userId) {
+        return getBPackageManager().installPackageAsUser(apk.getAbsolutePath(), InstallOption.installByStorage(), userId);
+    }
+
+    public InstallResult installPackageAsUser(Uri apk, int userId) {
+        return getBPackageManager().installPackageAsUser(apk.toString(), InstallOption.installByStorage().makeUriFile(), userId);
+    }
+
+    public InstallResult installXPModule(File apk) {
+        return getBPackageManager().installPackageAsUser(apk.getAbsolutePath(), InstallOption.installByStorage().makeXposed(), BUserHandle.USER_XPOSED);
+    }
+
+    public InstallResult installXPModule(Uri apk) {
+        return getBPackageManager().installPackageAsUser(apk.toString(), InstallOption.installByStorage().makeXposed().makeUriFile(), BUserHandle.USER_XPOSED);
+    }
+
+    public InstallResult installXPModule(String packageName) {
+        try {
+            PackageInfo packageInfo = getPackageManager().getPackageInfo(packageName, 0);
+            String path = packageInfo.applicationInfo.sourceDir;
+            return getBPackageManager().installPackageAsUser(path, InstallOption.installBySystem().makeXposed(), BUserHandle.USER_XPOSED);
+        } catch (PackageManager.NameNotFoundException e) {
+            e.printStackTrace();
+            return new InstallResult().installError(e.getMessage());
+        }
+    }
+
+    public void uninstallXPModule(String packageName) {
+        uninstallPackage(packageName);
+    }
+
+    public boolean isXPEnable() {
+        return BXposedManager.get().isXPEnable();
+    }
+
+    public void setXPEnable(boolean enable) {
+        BXposedManager.get().setXPEnable(enable);
+    }
+
+    public boolean isXposedModule(File file) {
+        return XposedParserCompat.isXPModule(file.getAbsolutePath());
+    }
+
+    public boolean isInstalledXposedModule(String packageName) {
+        return isInstalled(packageName, BUserHandle.USER_XPOSED);
+    }
+
+    public boolean isModuleEnable(String packageName) {
+        return BXposedManager.get().isModuleEnable(packageName);
+    }
+
+    public void setModuleEnable(String packageName, boolean enable) {
+        BXposedManager.get().setModuleEnable(packageName, enable);
+    }
+
+    public List<InstalledModule> getInstalledXPModules() {
+        return BXposedManager.get().getInstalledModules();
+    }
+
+    public List<ApplicationInfo> getInstalledApplications(int flags, int userId) {
+        return getBPackageManager().getInstalledApplications(flags, userId);
+    }
+
+    public List<PackageInfo> getInstalledPackages(int flags, int userId) {
+        return getBPackageManager().getInstalledPackages(flags, userId);
+    }
+
+    public void clearPackage(String packageName, int userId) {
+        BPackageManager.get().clearPackage(packageName, userId);
+    }
+
+    public void stopPackage(String packageName, int userId) {
+        BPackageManager.get().stopPackage(packageName, userId);
+    }
+    
+    public boolean isAppRunning(String packageName, int userId) {
+        return getBPackageManager().isAppRunning(packageName, userId);
+    }
+
+    public List<BUserInfo> getUsers() {
+        return BUserManager.get().getUsers();
+    }
+
+    public BUserInfo createUser(int userId) {
+        return BUserManager.get().createUser(userId);
+    }
+
+    public ApplicationInfo getApplicationInfo(String packageName) {
+        return BPackageManager.get().getApplicationInfo(packageName, 0, 0);
+    }
+    
+    public void deleteUser(int userId) {
+        BUserManager.get().deleteUser(userId);
+    }
+
+    public List<AppLifecycleCallback> getAppLifecycleCallbacks() {
+        return mAppLifecycleCallbacks;
+    }
+
+    public void removeAppLifecycleCallback(AppLifecycleCallback appLifecycleCallback) {
+        mAppLifecycleCallbacks.remove(appLifecycleCallback);
+    }
+
+    public void addAppLifecycleCallback(AppLifecycleCallback appLifecycleCallback) {
+        mAppLifecycleCallbacks.add(appLifecycleCallback);
+    }
+
+    public boolean isSupportGms() {
+        return GmsCore.isSupportGms();
+    }
+
+    public boolean isInstallGms(int userId) {
+        return GmsCore.isInstalledGoogleService(userId);
+    }
+
+    public InstallResult installGms(int userId) {
+        return GmsCore.installGApps(userId);
+    }
+
+    public boolean uninstallGms(int userId) {
+        GmsCore.uninstallGApps(userId);
+        return !GmsCore.isInstalledGoogleService(userId);
+    }
+
+    public IBinder getService(String name) {
+        IBinder binder = mServices.get(name);
+        if (binder != null && binder.isBinderAlive()) {
+            return binder;
+        }
+        Bundle bundle = new Bundle();
+        bundle.putString("_G_|_server_name_", name);
+        Bundle vm = ProviderCall.callSafely(ProxyManifest.getBindProvider(), "VM", null, bundle);
+        binder = BundleCompat.getBinder(vm, "_G_|_server_");
+        Slog.d(TAG, "getService: " + name + ", " + binder);
+        mServices.put(name, binder);
+        return binder;
+    }
+
+    //Process type
+    private enum ProcessType {
+        Server, //Server process
+        BAppClient, //Black app process
+        Main, //Main process
+    }
+
+    public boolean isBlackProcess() {
+        return mProcessType == ProcessType.BAppClient;
+    }
+
+    public boolean isMainProcess() {
+        return mProcessType == ProcessType.Main;
+    }
+
+    public boolean isServerProcess() {
+        return mProcessType == ProcessType.Server;
+    }
+
+    @Override
+    public boolean setHideRoot() {
+        return mClientConfiguration.setHideRoot();
+    }
+
+    @Override
+    public String getHostPackageName() {
+        return mClientConfiguration.getHostPackageName();
+    }
+
+    @Override
+    public boolean requestInstallPackage(File file) {
+        return mClientConfiguration.requestInstallPackage(file);
+    }
+
+    private void startLogcat() {
+        new Thread(() -> {
+            File file = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), getContext().getPackageName() + "_logcat.txt");
+            FileUtils.deleteDir(file);
+            ShellUtils.execCommand("logcat -c", false);
+            ShellUtils.execCommand("logcat -f " + file.getAbsolutePath(), false);
+        }).start();
+    }
+
+    @SuppressLint("NewApi")
+    private static String getProcessName(Context context) {
+        // Android 9+ (API 28): Application.getProcessName() — no IPC, no permissions needed.
+        // Works correctly on A12/A14/A15/A16. The old getRunningAppProcesses() path returns
+        // only the calling process on API 31+ for non-system apps, so it is useless there.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            String name = Application.getProcessName();
+            if (name != null && !name.isEmpty()) return name;
+        }
+        // Android < 9: try ActivityManager (still works reliably there).
+        int myPid = Process.myPid();
+        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (am != null) {
+            java.util.List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
+            if (procs != null) {
+                for (ActivityManager.RunningAppProcessInfo info : procs) {
+                    if (info.pid == myPid) return info.processName;
+                }
+            }
+        }
+        // Last resort: read /proc/self/cmdline directly (always available).
+        try {
+            java.io.FileInputStream fis = new java.io.FileInputStream("/proc/self/cmdline");
+            byte[] buf = new byte[256]; int n = fis.read(buf); fis.close();
+            if (n > 0) {
+                // cmdline is NUL-separated; take only the first segment.
+                String raw = new String(buf, 0, n, "UTF-8");
+                int nul = raw.indexOf('\0');
+                return nul > 0 ? raw.substring(0, nul) : raw.trim();
+            }
+        } catch (Exception ignored) {}
+        throw new RuntimeException("getProcessName failed — could not determine current process");
+    }
+
+    public static boolean is64Bit() {
+        if (BuildCompat.isM()) {
+            return Process.is64Bit();
+        } else {
+            return Build.CPU_ABI.equals("arm64-v8a");
+        }
+    }
+
+    private void initNotificationManager() {
+        NotificationManager nm = (NotificationManager) MundoCore.getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+        String CHANNEL_ONE_ID = MundoCore.getContext().getPackageName() + ".vbox_core";
+        String CHANNEL_ONE_NAME = "vbox_core";
+        if (BuildCompat.isOreo_MR1()) {
+            NotificationChannel notificationChannel = new NotificationChannel(CHANNEL_ONE_ID,CHANNEL_ONE_NAME, NotificationManager.IMPORTANCE_NONE);
+            notificationChannel.enableLights(false);
+            notificationChannel.setShowBadge(false);
+            notificationChannel.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
+            nm.createNotificationChannel(notificationChannel);
+        }
+    }
+
+    // 20240801 add request permission add start 0
+    public boolean checkSelfPermission(String permission) {
+        return getPackageManager().checkPermission(permission, getHostPackageName()) == 0;
+    }
+    // 20240801 add request permission add end 0
+}

@@ -1,0 +1,10 @@
+*.gradle.kts
+.gradle/
+local.properties
+**/build/intermediates/
+**/build/tmp/
+**/build/kotlin/
+**/build/generated/
+**/build/outputs/logs/
+# Keep the release aar
+!**/build/outputs/aar/MundoCore-release.aar

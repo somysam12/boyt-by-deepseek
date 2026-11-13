@@ -1,0 +1,5 @@
+-keep class com.mundo.** {*; }
+-keep class com.mundo.jnihook.** {*; }
+-keep class black.** {*; }
+-keep class android.** {*; }
+-keep class com.android.** {*; }
