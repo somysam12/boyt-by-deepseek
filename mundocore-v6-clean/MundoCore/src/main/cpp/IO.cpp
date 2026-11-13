@@ -33,7 +33,9 @@ const char *IO::redirectPath(const char *__path) {
     list<IO::RelocateInfo>::iterator iterator;
     for (iterator = relocate_rule.begin(); iterator != relocate_rule.end(); ++iterator) {
         IO::RelocateInfo info = *iterator;
-        if (strstr(__path, info.targetPath) && !strstr(__path, "/SdCard/")) {
+        // Redirect only if the path matches the rule target AND is not already
+        // under the relocate destination (prevents double-redirect/nesting).
+        if (strstr(__path, info.targetPath) && !strstr(__path, info.relocatePath)) {
             char *ret = replace(__path, info.targetPath, info.relocatePath);
              ALOGD("redirectPath %s  => %s", __path, ret);
             return ret;

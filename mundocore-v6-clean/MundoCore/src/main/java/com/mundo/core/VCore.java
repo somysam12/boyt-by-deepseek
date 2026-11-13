@@ -57,10 +57,23 @@ public class VCore {
         sBlackTree.add(path);
     }
 
+    private static String sHostObbMarker;
+    private static String hostObbMarker() {
+        if (sHostObbMarker == null) {
+            try {
+                File obb = MundoCore.getContext().getObbDir();
+                sHostObbMarker = (obb != null) ? obb.getAbsolutePath() : "/Android/obb/";
+            } catch (Throwable t) { sHostObbMarker = "/Android/obb/"; }
+        }
+        return sHostObbMarker;
+    }
+
     public String redirectPath(String path) {
         if (TextUtils.isEmpty(path))
             return path;
-        if (path.contains("/SdCard/")) {
+        // Already-redirected paths live under the host obb dir — don't redirect
+        // again (prevents the /storage/emulated/0 rule from nesting the path).
+        if (path.contains(hostObbMarker())) {
             return path;
         }
         String search = sBlackTree.search(path);
