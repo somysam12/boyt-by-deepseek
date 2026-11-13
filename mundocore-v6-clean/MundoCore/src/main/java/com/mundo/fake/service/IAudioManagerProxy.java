@@ -21,6 +21,12 @@ import com.mundo.utils.MethodParameterUtils;
  * @date :2024/4/20 20:48
  **/
 public class IAudioManagerProxy extends BinderInvocationStub {
+
+    // Tracks whether BT SCO is currently active so we can fix audio routing.
+    // When SCO is on, game audio must NOT be forced to speaker — blocking
+    // setSpeakerphoneOn(true) keeps all audio (game + voice) on the BT headset.
+    private static volatile boolean sBluetoothScoActive = false;
+
     public IAudioManagerProxy() {
         super(BRServiceManager.get().getService(Context.AUDIO_SERVICE));
     }
@@ -76,6 +82,7 @@ public class IAudioManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             MethodParameterUtils.replaceLastAppPkg(args);
+            sBluetoothScoActive = true;
             return method.invoke(who, args);
         }
     }
@@ -86,6 +93,7 @@ public class IAudioManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             MethodParameterUtils.replaceLastAppPkg(args);
+            sBluetoothScoActive = false;
             return method.invoke(who, args);
         }
     }
@@ -96,6 +104,9 @@ public class IAudioManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             MethodParameterUtils.replaceLastAppPkg(args);
+            if (args != null && args.length > 0) {
+                sBluetoothScoActive = Boolean.TRUE.equals(args[0]);
+            }
             return method.invoke(who, args);
         }
     }
@@ -106,6 +117,13 @@ public class IAudioManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             MethodParameterUtils.replaceLastAppPkg(args);
+            // FIX: When BT SCO is active (game mic on with BT headset), block any
+            // attempt to enable speakerphone. Without this, the game audio routes
+            // to the speaker while teammate voice stays on BT — both should be on BT.
+            if (sBluetoothScoActive && args != null && args.length > 0
+                    && Boolean.TRUE.equals(args[0])) {
+                return null;
+            }
             return method.invoke(who, args);
         }
     }
