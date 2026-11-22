@@ -1,0 +1,10 @@
+INSTALL (native-lib-hook-analysis skill)
+
+Project-level (ye repo ke sessions me auto-available):
+  already committed at:  .claude/skills/native-lib-hook-analysis/
+
+Kisi bhi project / global me use karne ke liye:
+  is folder ko copy kar ->  ~/.claude/skills/native-lib-hook-analysis/
+  (Claude Code restart / naya session -> skill description se khud trigger)
+
+Scripts ke deps:  pip install unicorn capstone pyelftools
