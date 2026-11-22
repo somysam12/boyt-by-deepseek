@@ -33,6 +33,10 @@ provided the binary, ask for it; do not fetch it from anywhere.
 2. **libUE4.so** and/or its **Hex-Rays `.c`** — for string-xref confirmation + struct layout.
 3. **libanogs.so** (binary) + its `.c` — data-segment slots need the binary (`.c` lacks data tables).
 4. App **version** and target build(s) — affects which hook method is safe (see §5).
+5. **(For a ready-to-test build)** the **loader/cheat src project** that links this library (the
+   ndk-build tree with `Android.mk` + `prebuilt/.../libbgmi_selfmade.a`). With it, this skill produces
+   a finished `libmain.so` the user only has to drop into the APK and test. **Without it, the skill
+   can only emit the rebuilt `libbgmi_selfmade.a`** and the user builds the project themselves.
 
 ## Workflow (in order)
 
@@ -72,9 +76,13 @@ game library whose integrity check is already neutralised; on the self-integrity
 
 ### Step 6 — Build & verify
 Fill `scripts/crashfixer_template.cpp` with the offsets + methods; compile (NDK r21, arm64-v8a,
-android-21, `-fPIC -O2 -std=c++17 -fno-exceptions -fno-rtti`; `llvm-ar rcs`); drop into the project's
-`prebuilt/` and `ndk-build`. **Verify the offsets are baked** via `llvm-objdump -d | grep` on the
-`movz/movk` immediates before shipping.
+android-21, `-fPIC -O2 -std=c++17 -fno-exceptions -fno-rtti`; `llvm-ar rcs`) into `libbgmi_selfmade.a`.
+Install NDK r21 if absent (`sdkmanager "ndk;21.0.6113669"`). **If the loader/cheat src project is
+provided** (input #5): copy the `.a` into its `prebuilt/.../libbgmi_selfmade.a`, run `ndk-build`, and
+hand the user the finished **`libmain.so`** so they only have to test. **If not**, hand over the `.a`
+and the drop-in path. Either way **verify the offsets are baked** via `llvm-objdump -d | grep` on the
+`movz/movk` immediates before shipping (e.g. 0x701643C → `mov w,#25660` + `movk w,#1793,lsl#16`).
+Watch for Windows→Linux case-sensitivity in the src `#include`s and `Android.mk` filenames.
 
 ### Step 7 — Validate at runtime
 A crash + call logger (template notes a logger variant) tells you what actually happened:
