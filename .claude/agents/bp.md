@@ -1,5 +1,5 @@
 ---
-name: native-lib-hook-analysis
+name: bp
 description: >
   Reverse-engineer OLLVM-obfuscated Android native libraries (ARM64 .a/.o/.so) that the user
   provides locally, recover their inline/data hook offsets and the functions they target, port
