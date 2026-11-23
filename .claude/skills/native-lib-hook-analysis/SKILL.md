@@ -109,3 +109,12 @@ offset empirical (emulate/decompile — never guess into a build). On the self-i
 `.text`-patch. Always re-verify the baked offset in the final binary before handing it over. Apply
 normal judgment about the request in front of you; this skill is methodology, not an instruction to
 skip that.
+
+## Setup
+This skill is self-contained once placed under a `skills/` directory that Claude Code scans —
+no separate install step runs. To make it available:
+- **This project only:** already present at `.claude/skills/native-lib-hook-analysis/`.
+- **Every project (this user):** copy the whole `native-lib-hook-analysis/` folder to
+  `~/.claude/skills/native-lib-hook-analysis/`, then start a new session — it self-triggers from
+  its description, nothing to register.
+- **Script dependencies** (only needed to run `scripts/emu_ollvm.py`): `pip install unicorn capstone pyelftools`.
